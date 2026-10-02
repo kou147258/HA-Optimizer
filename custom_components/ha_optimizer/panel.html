@@ -1752,9 +1752,16 @@ function recalcHealthFromResults() {
   document.getElementById('statMedium').textContent = medium;
   document.getElementById('statHigh').textContent   = high;
 
+  // The denominator is the number of entities the scan looked at, which only
+  // the stored statistics know. This used to fall back to
+  // `allResults.length * 5` - a made-up multiplier, so whenever it fired the
+  // score below was fiction presented as a number. Candidates alone are a
+  // well-defined denominator and are what is left when the statistics are
+  // missing; the score is then conservative rather than invented.
   const cachedTotalEl = document.getElementById('statTotal');
   const cachedTotal = parseInt(cachedTotalEl?.textContent) || 0;
-  const total = cachedTotal > 0 ? cachedTotal : allResults.length * 5;
+  const total = cachedTotal > 0 ? cachedTotal : allResults.length;
+  if (total <= 0) return;
 
   const penalty = high * 10 + medium * 3 + low * 1;
   const hs = Math.max(0, Math.min(100, Math.round(100 - (penalty / total) * 100)));

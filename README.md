@@ -2,7 +2,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 ![version](https://img.shields.io/badge/version-1.7.0-blue)
-![HA](https://img.shields.io/badge/Home%20Assistant-2023.1+-green)
+![HA](https://img.shields.io/badge/Home%20Assistant-2024.11+-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.11+-yellow)
 ![languages](https://img.shields.io/badge/UI-English%20%2B%20%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-blueviolet)
@@ -415,13 +415,15 @@ The two actions are also available as `ha_optimizer.restore_all` and `ha_optimiz
 
 | | |
 |---|---|
-| Home Assistant | 2023.7+ (2023.1+ for most features) |
+| Home Assistant | 2024.11+ |
 | Database | SQLite (default) and MySQL/MariaDB |
 | Config | UI config flow — no YAML required |
 | Dependencies | None — uses only HA built-ins |
 | Python | 3.11+ |
 
-> **Why 2023.7+?** The panel asks for a service response when it calls an analysis service (`return_response`, introduced in HA 2023.7). Every service still works on 2023.1+ — the panel just falls back to reading the stored results.
+> **Why 2024.11+?** That is the version Home Assistant stopped handing the config entry to the options flow's constructor and started injecting it on the instance instead. The options dialog works on both sides of that split, but this is the oldest version actually exercised here, and `manifest.json` says so — an integration that declares no minimum gets installed on versions whose APIs it does not use, and then fails in the one dialog you reach to find out.
+
+> The panel also asks for a service response when it calls an analysis service (`return_response`, HA 2023.7+). That was the old floor, and it was the wrong one to advertise: the services kept working on old versions while the **settings dialog** raised `AttributeError` on anything before 2024.11.
 
 ---
 

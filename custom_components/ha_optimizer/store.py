@@ -34,7 +34,18 @@ class PurgeStore:
                       len(self._soft_data))
 
     async def async_save_scan_results(self, data: dict):
-        """Save scan results."""
+        """Save scan results.
+
+        Note what this does NOT do: it never touches `_soft_data`. A soft
+        deleted entity is disabled, and the scanner skips disabled entities
+        (`entry.disabled_by is None`), so a trash snapshot can never be
+        refreshed by a later scan. If saving results also pruned snapshots
+        whose entity is absent from the new set - which is every trash entry,
+        by definition - then "restore" would silently stop returning entities
+        to the list again, and the fix from 1.7.0 would quietly undo itself.
+        The snapshot is the only record of why an entity was a candidate, so it
+        outlives the scan that produced it.
+        """
         self._scan_data = data
         await self._scan_store.async_save(data)
 

@@ -57,17 +57,42 @@ class PurgeEngineConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class PurgeEngineOptionsFlow(config_entries.OptionsFlow):
-    """Handle the options flow for HA Optimizer."""
+    """Handle the options flow for HA Optimizer.
 
-    # No __init__ needed — HA injects config_entry via self.config_entry in newer versions
+    Home Assistant split this in two: up to 2024.10 the config entry was
+    handed to the flow's constructor, and from 2024.11 it is injected on the
+    instance instead - and assigning it in `__init__` became a deprecation
+    error. The original code relied on the new behaviour while the README
+    promised 2023.7, which meant the settings dialog would have raised
+    `AttributeError` on every older instance.
+
+    Accepting both is cheap and harmless, so the flow does that and
+    `manifest.json` states the version that is actually exercised in CI.
+    """
+
+    def __init__(self, config_entry=None):
+        # Only the pre-2024.11 path ever has anything to store.
+        if config_entry is not None:
+            self._legacy_entry = config_entry
+
+    def _entry(self):
+        """The config entry, whichever way this version of HA provides it."""
+        try:
+            entry = self.config_entry      # HA >= 2024.11 sets this for us
+        except (AttributeError, TypeError):
+            entry = None
+        return entry or getattr(self, "_legacy_entry", None)
 
     async def async_step_init(self, user_input=None):
         """Manage the options."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
+        entry = self._entry()
         # Read current values from either options or data (first-time migration)
-        current = dict(self.config_entry.options) or dict(self.config_entry.data)
+        current = dict(entry.options) if entry else {}
+        if not current and entry:
+            current = dict(entry.data)
 
         schema = vol.Schema({
             vol.Optional(
