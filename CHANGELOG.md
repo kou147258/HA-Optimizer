@@ -11,6 +11,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 - 🇨🇳 **简体中文 (zh-CN)** — full translation of all 380 UI keys, added as the 13th interface language. Covers every label, button, message, placeholder, theme description, card-type description and fingerprint metric, including the 25 parameterised (`(n) => ...`) entries.
+- 🔧 **`tools/check_i18n.py`** — dependency-free guard that fails when a language drifts from the `en` reference (missing/extra keys, mismatched `{placeholders}` or HTML tags, backend keys no dictionary defines, `t()` call sites with unknown keys). Wired into CI as the `i18n Consistency` job and as a release gate.
+
+### Fixed
+- 🌍 **Backend results are now translatable in all 13 languages.** `scanner.py` and `fingerprint.py` used to embed English (and, in `_diagnose()`, Vietnamese) prose directly in the payloads the panel renders. They now emit i18n keys — a bare key string, or `{key, params}` for parameterised text — which the panel already knew how to resolve through `tVal()`. This unblocks the Dashboard, State Storm, Dead Code, Health and Fingerprint tabs, which previously showed English to every language user regardless of the `dash_*` / `storm_*` / `dead_*` / `health_*` / `fp_*` translation entries that already existed. 23 new keys were added to cover the messages that had no existing entry.
+- 🇩🇪🇵🇹 **Completed the German and Portuguese dictionaries** — both were missing 39 keys (the whole `dashLbl*` dashboard-label family plus `recorderLoading`) and silently fell back to Vietnamese for those labels. The remaining eight languages were each missing `recorderLoading`.
+- 🪟 **Health tab diagnosis filtering** no longer inspects rendered text. It used `dg.startsWith('✅')` / `dg.includes('battery')` to hide the "operating normally" and battery entries, which only ever worked for the Vietnamese source strings. It now filters on the i18n key via a new `_i18nKeyOf()` helper, so it behaves correctly in every language.
+- 🧹 **Remaining hardcoded UI copy removed** from the panel: the connection-error banner, the `+N more` / `Registry` / `N failed` labels, the `N cards` counter, the fingerprint metric label and unit (now resolved through the existing `fp_metric_*` / `fp_unit_*` keys), and the Vietnamese-only Health tab breakdown rows and counters.
+- 🐛 Fixed two Vietnamese translations (`fingerprintDesc`, `fingerprintCollectHint`) that had an unterminated `<span data-i18n="...">` wrapper baked into the string, injecting a duplicate span into the DOM.
+- 🗑️ `HEAVY_CARD_SEVERITY` and `METRIC_LABELS` now hold i18n keys instead of English prose, so the card-type and metric descriptions follow the selected language.
 
 ---
 

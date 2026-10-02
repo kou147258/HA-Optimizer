@@ -133,9 +133,11 @@ Switch the entire panel's look with one click — your preference is saved autom
 | 🧛 Dracula | Classic Dracula dark + soft purple |
 
 ### 🌍 13 Interface Languages *(new)*
-The entire panel UI — every label, button, message, and error — is fully translated into 13 languages. Switch instantly from the language selector in the top bar; your choice persists across sessions.
+The entire panel UI — every label, button, message, and error — is fully translated into 13 languages. Switch instantly from the language selector in the top bar; your choice persists across sessions. Backend diagnostics (dashboard findings, state-storm advice, health diagnoses, fingerprint anomalies) are translated too.
 
 **Supported:** 🇻🇳 Tiếng Việt · 🇬🇧 English · 🇨🇳 简体中文 · 🇩🇪 Deutsch · 🇫🇷 Français · 🇳🇱 Nederlands · 🇵🇱 Polski · 🇸🇪 Svenska · 🇭🇺 Magyar · 🇨🇿 Čeština · 🇮🇹 Italiano · 🇵🇹 Português · 🇸🇮 Slovenščina
+
+> **Adding a language:** copy the `en` block inside `const I18N` in `panel.html`, paste it as a new `xx: { … }` entry, add it to the `LANGUAGES` array above, then run `python3 tools/check_i18n.py` — it verifies key coverage, `{placeholders}` and HTML-tag parity across every language, and that every key the Python backend emits actually resolves. The same check runs in CI.
 
 ---
 
