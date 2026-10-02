@@ -430,6 +430,82 @@ check("the destructive row action is an outline, not a solid red block",
 check("both row handlers are still wired",
       "restoreEntity(" in panel and "hardDeleteEntity(" in panel)
 
+# ═══ where the rules live matters as much as that they exist ════════════════
+# The 1.7.5 rules were written next to `#tabSoft td, #tabSoft th`, which sits
+# inside `@media (max-width: 768px)`. Every assertion above passed - the rules
+# exist, the markup uses them, nothing is inside a media query as far as any
+# of them looked - and the user saw no change at all, on a ~1900px panel.
+#
+# A rule that exists but is scoped to the wrong viewport is not a rule. Match
+# each @media's balanced extent and assert the rule falls outside all of them.
+def media_extents(src: str):
+    out = []
+    for m in re.finditer(r"@media[^{]*\{", src):
+        open_i = src.index("{", m.start())
+        depth, q, comment, k = 0, None, False, open_i
+        end_i = -1
+        while k < len(src):
+            c, n = src[k], src[k + 1] if k + 1 < len(src) else ""
+            if comment:
+                if c == "*" and n == "/":
+                    comment = False
+                    k += 1
+            elif q:
+                if c == "\\":
+                    k += 1
+                elif c == q:
+                    q = None
+            elif c == "/" and n == "*":
+                comment = True
+                k += 1
+            elif c in ('"', "'"):
+                q = c
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    end_i = k
+                    break
+            k += 1
+        out.append((m.start(), end_i, m.group(0).strip().rstrip("{")))
+    return out
+
+
+MEDIAS = media_extents(panel)
+check("the media queries in the stylesheet were all located",
+      len(MEDIAS) >= 3 and all(e[1] > e[0] for e in MEDIAS),
+      "a checker that cannot find the media queries passes everything under them")
+_rule = panel.index("#tabSoft .trash-actions {")
+_nested = [e for e in MEDIAS if _rule > e[0] and _rule < e[1]]
+check("the trash action rules are NOT inside any media query",
+      not _nested,
+      f"they sit inside {_nested[0][2].strip() if _nested else ''} and only ever "
+      "apply at that breakpoint")
+# the same trap for the table width the row layout depends on
+_tw = panel.index("#tabSoft table { min-width:")
+check("the trash table's min-width is unconditional too",
+      not [e for e in MEDIAS if _tw > e[0] and _tw < e[1]])
+# and the destructive-button outline
+_dg = panel.index("#tabSoft .trash-actions .btn-danger {")
+check("the destructive row button's outline is unconditional",
+      not [e for e in MEDIAS if _dg > e[0] and _dg < e[1]])
+
+# ═══ the modal must not re-blur the viewport on every repaint ═══════════════
+# The strip repaints on a 5-10s poll with transitions on the gauge needles, and
+# a backdrop-filter re-blurs the whole viewport each time. Reported as "the UI
+# keeps flickering" whenever a confirmation was open.
+check("the modal overlay has no backdrop-filter declaration",
+      not re.search(r"backdrop-filter\s*:\s*blur", panel),
+      "at a 0.7 dim the blur is barely visible and it re-blurs everything "
+      "underneath on every repaint")
+check("it is dimmed enough without the blur",
+      re.search(r"\.modal-overlay \{[^}]*background: rgba\(0,\s*0,\s*0,\s*0\.7", panel) is not None)
+check("the top-strip poll stands down while a confirmation is open",
+      "modalOpen" in panel and "purgeModal" in panel,
+      "gauges jumping behind a dialog are noise, and they were the thing "
+      "being re-blurred")
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} check(s) FAILED:")
