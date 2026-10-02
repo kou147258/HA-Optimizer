@@ -1,7 +1,7 @@
 # 🧹 HA Optimizer
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-1.4.0-blue)
+![version](https://img.shields.io/badge/version-1.5.0-blue)
 ![HA](https://img.shields.io/badge/Home%20Assistant-2023.1+-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.11+-yellow)
@@ -132,10 +132,12 @@ Switch the entire panel's look with one click — your preference is saved autom
 | 🧊 Arctic | Icy white — bright mode |
 | 🧛 Dracula | Classic Dracula dark + soft purple |
 
-### 🌍 13 Interface Languages *(new)*
-The entire panel UI — every label, button, message, and error — is fully translated into 13 languages. Switch instantly from the language selector in the top bar; your choice persists across sessions. Backend diagnostics (dashboard findings, state-storm advice, health diagnoses, fingerprint anomalies) are translated too.
+### 🌍 2 Interface Languages
+The entire panel UI — every label, button, message, and error — is fully translated into English and Simplified Chinese. Switch instantly from the language selector in the top bar; your choice persists across sessions. Backend diagnostics (dashboard findings, state-storm advice, health diagnoses, fingerprint anomalies) are translated too.
 
-**Supported:** 🇻🇳 Tiếng Việt · 🇬🇧 English · 🇨🇳 简体中文 · 🇩🇪 Deutsch · 🇫🇷 Français · 🇳🇱 Nederlands · 🇵🇱 Polski · 🇸🇪 Svenska · 🇭🇺 Magyar · 🇨🇿 Čeština · 🇮🇹 Italiano · 🇵🇹 Português · 🇸🇮 Slovenščina
+**Supported:** 🇬🇧 English · 🇨🇳 简体中文
+
+With nothing stored, the panel follows Home Assistant's own language: `zh-Hans` (or any `zh-*`) opens in Chinese, everything else opens in English.
 
 > **Adding a language:** copy the `en` block inside `const I18N` in `panel.html`, paste it as a new `xx: { … }` entry, add it to the `LANGUAGES` array above, then run `python3 tools/check_i18n.py` — it verifies key coverage, `{placeholders}` and HTML-tag parity across every language, and that every key the Python backend emits actually resolves. The same check runs in CI.
 

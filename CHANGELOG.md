@@ -7,6 +7,28 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ---
 
+## [1.5.0] - 2026-10-02
+
+Interface languages trimmed to **English + 简体中文**. This is a deliberate
+narrowing of 1.4.0, not an accident: the eleven other dictionaries are gone
+from `panel.html`, the `LANGUAGES` table and the HA-language map, which takes
+the shipped panel from 510 KB to 252 KB. Vietnamese went with them, so this
+fork no longer speaks the upstream author's first language — see the note at
+the bottom before opening a PR against `doanlong1412/HA-Optimizer`.
+
+### Added
+- 🇨🇳 **The theme names are translated.** The eleven theme entries (Deep Space, Midnight Purple, …) had a hardcoded English `name` next to a translated `descKey`, so a Chinese user saw "深色 + 蓝" described underneath a button reading "Deep Space". Each theme now carries a `nameKey` and both the menu items and the current-theme button resolve through `t()`.
+
+### Fixed
+- 🌐 **Changing the language now updates the theme name on the button.** `_applyTranslations()` rebuilt the theme *menu* but never the `#themeCurrentName` label, which is written in `setTheme()` only. The menu followed the language; the button stayed on whatever language the page booted in — which is why "Deep Space" survived into a fully Chinese panel.
+- 🏳️ **The static shell is English, not Vietnamese.** The panel's HTML was written in the upstream source language, so it painted Vietnamese for a moment before the first `_applyTranslations()` pass, and the language button's initial flag was still 🇻🇳. All 80 `data-i18n` elements now ship their English text, `<html lang>` is `en`, the flag is 🇬🇧, and the "shipped in Vietnamese, so only re-apply for other languages" condition is gone — every language re-applies now.
+- 💥 **`tVal()` could throw.** It fell back to `I18N['vi']` for the bare-key lookup; with `vi` removed that expression is `undefined`, and `dict[val]` on it is a `TypeError` on any backend string that happened to be a key. It falls back to `en` now.
+
+### Changed
+- ✂️ **Eleven dictionaries removed:** vi, de, fr, nl, pl, sv, hu, cs, it, pt, sl. `_HA_LANG_MAP` keeps only `zh`; any other HA language resolves to the English default.
+
+---
+
 ## [1.4.0] - 2026-10-02
 
 This release supersedes the earlier `1.3.0` tag, which was pushed before the

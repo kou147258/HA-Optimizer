@@ -1,7 +1,7 @@
 # 🧹 HA Optimizer
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-1.4.0-blue)
+![version](https://img.shields.io/badge/version-1.5.0-blue)
 ![HA](https://img.shields.io/badge/Home%20Assistant-2023.1+-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.11+-yellow)
@@ -132,10 +132,10 @@ So sánh hành vi HA hôm nay **với chính lịch sử baseline của bạn** 
 | 🧊 Arctic | Trắng băng — chế độ sáng |
 | 🧛 Dracula | Classic Dracula tối + tím nhạt |
 
-### 🌍 13 Ngôn Ngữ Giao Diện *(tính năng mới)*
-Toàn bộ panel — mọi nhãn, nút, thông báo và lỗi — đều được dịch đầy đủ sang 13 ngôn ngữ. Chuyển đổi tức thì từ thanh chọn ngôn ngữ trên topbar; lựa chọn của bạn được lưu qua các phiên làm việc.
+### 🌍 2 Ngôn Ngữ Giao Diện
+Toàn bộ panel — mọi nhãn, nút, thông báo và lỗi — đều được dịch đầy đủ sang tiếng Anh và tiếng Trung giản thể. Chuyển đổi tức thì từ thanh chọn ngôn ngữ trên topbar; lựa chọn của bạn được lưu qua các phiên làm việc. Khi chưa có lựa chọn nào được lưu, panel sẽ theo ngôn ngữ của Home Assistant.
 
-**Hỗ trợ:** 🇻🇳 Tiếng Việt · 🇬🇧 English · 🇨🇳 简体中文 · 🇩🇪 Deutsch · 🇫🇷 Français · 🇳🇱 Nederlands · 🇵🇱 Polski · 🇸🇪 Svenska · 🇭🇺 Magyar · 🇨🇿 Čeština · 🇮🇹 Italiano · 🇵🇹 Português · 🇸🇮 Slovenščina
+**Hỗ trợ:** 🇬🇧 English · 🇨🇳 简体中文
 
 ---
 ## 🛠️ Cài Đặt
@@ -390,7 +390,7 @@ automation:
 - 🧩 Quản lý add-on với CPU/RAM trực tiếp mỗi add-on (tự làm mới 5 giây)
 - 🖥️ Biểu đồ tài nguyên realtime (CPU / RAM / Disk) — luôn hiển thị
 - 🎨 11 theme tích hợp, lưu tự động
-- 🌍 13 ngôn ngữ giao diện, dịch đầy đủ
+- 🌍 Tiếng Anh + 简体中文, dịch đầy đủ
 - ⚙️ Config flow UI đầy đủ với options
 - 🔐 **Không cần Long-Lived Access Token** — xác thực qua WebSocket session của HA
 

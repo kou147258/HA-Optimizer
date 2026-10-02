@@ -448,6 +448,45 @@ def main() -> int:
                 f"(no data-i18n, no t()): {snippet!r}"
             )
 
+    # ── theme names: translated, and refreshed when the language changes ────
+    # The theme table carried a hardcoded English `name` beside a translated
+    # `descKey`, so a Chinese user saw "深色 + 蓝" under a button reading
+    # "Deep Space". Two separate things have to hold, and key parity sees
+    # neither: every visible theme string must go through t(), and the button
+    # label must be re-written inside _applyTranslations(). Rebuilding only the
+    # dropdown leaves the button frozen on the language the page booted in.
+    themes = re.search(r"const THEMES = \[(.*?)\n\];", panel, re.S)
+    if themes:
+        entries = re.findall(r"\{\s*id:\s*'([^']+)'(.*?)\}", themes.group(1), re.S)
+        for theme_id, rest in entries:
+            if "nameKey" not in rest:
+                problems.append(
+                    f"theme '{theme_id}' has no nameKey - its name would stay "
+                    f"English in every language"
+                )
+    for pattern, what in (
+        (r"\$\{th\.name\}", "buildThemeMenu renders ${th.name} instead of t(th.nameKey)"),
+        (r"themeCurrentName'\)\.textContent\s*=\s*thObj\.name",
+         "the theme button is written from thObj.name instead of t(thObj.nameKey)"),
+    ):
+        if re.search(pattern, panel):
+            problems.append(what)
+
+    apply_start = panel.find("function _applyTranslations()")
+    if apply_start != -1:
+        apply_end = panel.find("\nfunction ", apply_start + 10)
+        apply_body = panel[apply_start:apply_end if apply_end != -1 else len(panel)]
+        if "themeCurrentName" not in apply_body:
+            problems.append(
+                "_applyTranslations() never touches #themeCurrentName, so the "
+                "theme button keeps the language the page booted in"
+            )
+        if "buildThemeMenu" not in apply_body:
+            problems.append(
+                "_applyTranslations() never rebuilds the theme menu, so its "
+                "items keep the language the page booted in"
+            )
+
     if not args.quiet:
         print(f"languages : {len(i18n)} ({', '.join(sorted(i18n))})")
         print(f"keys      : {len(base_keys)} (reference: {BASE})")
