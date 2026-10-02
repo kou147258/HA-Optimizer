@@ -272,6 +272,16 @@ def main() -> int:
     def tags(v: str) -> list[str]:
         return sorted(TAG.findall(v))
 
+    # every value that legitimately appears in a dictionary, used to tell a real
+    # translation apart from prose hardcoded into the page
+    dict_values: set = set()
+    for _d in i18n.values():
+        for _v in _d.values():
+            if isinstance(_v, str):
+                dict_values.add(_v)
+            elif callable(_v):
+                dict_values.add(_v.__code__.co_consts[1] if len(_v.__code__.co_consts) > 1 else "")
+
     for lang in sorted(dupes):
         d = sorted(set(dupes[lang]))
         problems.append(
@@ -404,6 +414,39 @@ def main() -> int:
                     f"[{lang}] dashLbl* vocabulary matches {best_other} far better than its own "
                     f"({best_score} shared words vs {own}) - this family looks like {best_other} text"
                 )
+
+    # ── hardcoded prose that bypasses the dictionary ─────────────────────────
+    # Key parity cannot see this class at all: the strings are not keys, so
+    # every check above passes while the Health tab renders Vietnamese for
+    # everybody. Vietnamese is the upstream source language, so a line that
+    # carries Vietnamese diacritics AND is not marked `data-i18n=` AND does
+    # not already go through t() is prose that was never routed for translation.
+    vn = ("ăâđêôơưĂÂĐÊÔƠƯàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩị"
+          "òóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ")
+    dict_start = panel.find("const I18N = {")
+    if dict_start != -1:
+        dict_end = _match_brace(panel, dict_start + len("const I18N = ") - 1)
+        body = panel[:dict_start] + panel[dict_end:]
+        body = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
+        for n, line in enumerate(body.split("\n"), 1):
+            if not any(ch in vn for ch in line):
+                continue
+            if "data-i18n" in line or re.search(r"\bt\(", line):
+                continue
+            # elements whose text is assigned at runtime by id, and the
+            # LANGUAGES table (each entry is that language's own name)
+            if re.search(r'id="(?:langCurrentName|connStatusTxt)"', line):
+                continue
+            if re.search(r"\{\s*code:\s*'[a-z]{2}'", line):
+                continue
+            stripped = line.strip()
+            if stripped.startswith(("//", "*", "<!--", "/*")):
+                continue
+            snippet = stripped[:80]
+            problems.append(
+                f"hardcoded Vietnamese outside i18n at panel.html~{n} "
+                f"(no data-i18n, no t()): {snippet!r}"
+            )
 
     if not args.quiet:
         print(f"languages : {len(i18n)} ({', '.join(sorted(i18n))})")

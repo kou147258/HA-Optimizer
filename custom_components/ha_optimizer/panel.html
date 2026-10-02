@@ -924,10 +924,6 @@
       <span class="arrow">▾</span>
     </button>
   </div>
-  <!-- DONATE BUTTON -->
-  <a class="btn-donate" href="https://www.paypal.com/paypalme/doanlong1412" target="_blank" rel="noopener" id="btnDonate">
-    ☕ <span data-i18n="donate">Ủng hộ</span>
-  </a>
   <!-- CONNECTION STATUS (replaces token dropdown) -->
   <div id="connStatusWrap" style="display:flex;align-items:center;gap:6px;padding:7px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-size:0.8rem;color:var(--text-muted)">
     <span id="connStatusDot" style="width:7px;height:7px;border-radius:50%;background:var(--text-muted);display:inline-block;flex-shrink:0"></span>
@@ -1324,8 +1320,8 @@
     <div id="addonListWrap">
       <div class="empty-state">
         <div class="icon">🧩</div>
-        <h3>Chưa có dữ liệu</h3>
-        <p>Nhấn <strong>Làm mới</strong> để tải thông tin Add-on.</p>
+        <h3 id="addonEmptyTitle"></h3>
+        <p id="addonEmptyHint"></p>
       </div>
     </div>
 
@@ -1416,6 +1412,39 @@ function _getHass() {
     if (panel?.hass) return panel.hass;
   } catch(e) {}
   return null;
+}
+
+/**
+ * Map Home Assistant's own UI language onto one of our translation codes.
+ * HA reports values like "zh-Hans", "pt-BR", "de", "vi"; we key on the
+ * primary subtag. Returns null when we have no translation for it.
+ */
+const _HA_LANG_MAP = {
+  zh: 'zh', vi: 'vi', de: 'de', fr: 'fr', nl: 'nl', pl: 'pl',
+  sv: 'sv', hu: 'hu', cs: 'cs', it: 'it', pt: 'pt', sl: 'sl',
+};
+
+function _haLanguage() {
+  try {
+    const raw = _getHass()?.language;
+    if (!raw) return null;
+    const base = String(raw).toLowerCase().split(/[-_]/)[0];
+    return _HA_LANG_MAP[base] || null;
+  } catch (e) { return null; }
+}
+
+/**
+ * Decide the starting language. An explicit choice always wins; otherwise the
+ * panel follows Home Assistant, and only falls back to English.
+ * Upstream defaulted to Vietnamese, which is why a panel in any other language
+ * opened on Vietnamese before the visitor touched the language menu.
+ */
+function _resolveInitialLang() {
+  try {
+    const saved = localStorage.getItem('ha_optimizer_lang');
+    if (saved && LANGUAGES.some(l => l.code === saved)) return saved;
+  } catch (e) { /* private mode */ }
+  return _haLanguage() || 'en';
 }
 
 /**
@@ -1511,7 +1540,7 @@ function _updateConnStatus() {
   const hass = _getHass();
   if (hass) {
     dot.style.background = 'var(--success)';
-    txt.textContent = '✅ Đã kết nối HA';
+    txt.textContent = t('healthConnected');
   } else {
     dot.style.background = 'var(--warning)';
     txt.textContent = t('ingressMode');
@@ -3040,7 +3069,7 @@ function renderHealthResults(d, ts) {
   const banner      = ts ? _staleBanner('health', ts, 'triggerHealthAnalysis') : '';
   const scoreColor  = s => s >= 70 ? 'var(--success)' : s >= 40 ? 'var(--warning)' : 'var(--danger)';
   const scoreIcon   = s => s >= 70 ? '💚' : s >= 40 ? '🟡' : '🔴';
-  const statusLabel = s => s >= 70 ? 'Tốt' : s >= 40 ? 'Cảnh báo' : 'Nghiêm trọng';
+  const statusLabel = s => s >= 70 ? t('healthStatusGood') : s >= 40 ? t('healthStatusWarning') : t('healthStatusCritical');
   const sm          = d.summary || {};
 
   // ── Summary bar ────────────────────────────────────────────────
@@ -3048,23 +3077,23 @@ function renderHealthResults(d, ts) {
     <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-bottom:20px">
       <div class="stat-card" style="padding:14px; text-align:center">
         <div style="font-size:1.8rem; font-weight:800; color:var(--primary)">${sm.total_integrations ?? d.integrations.length}</div>
-        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px; text-transform:uppercase">Tổng Integration</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px; text-transform:uppercase">${t('healthLblTotalIntegrations')}</div>
       </div>
       <div class="stat-card" style="padding:14px; text-align:center">
         <div style="font-size:1.8rem; font-weight:800; color:var(--success)">${sm.good_count ?? 0}</div>
-        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px; text-transform:uppercase">💚 Tốt</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px; text-transform:uppercase">💚 ${t('healthLblGood')}</div>
       </div>
       <div class="stat-card" style="padding:14px; text-align:center">
         <div style="font-size:1.8rem; font-weight:800; color:var(--warning)">${sm.warning_count ?? 0}</div>
-        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px; text-transform:uppercase">🟡 Cảnh báo</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px; text-transform:uppercase">🟡 ${t('healthLblWarning')}</div>
       </div>
       <div class="stat-card" style="padding:14px; text-align:center">
         <div style="font-size:1.8rem; font-weight:800; color:var(--danger)">${sm.critical_count ?? 0}</div>
-        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px; text-transform:uppercase">🔴 Nghiêm trọng</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px; text-transform:uppercase">🔴 ${t('healthLblCritical')}</div>
       </div>
       <div class="stat-card" style="padding:14px; text-align:center">
         <div style="font-size:1.8rem; font-weight:800; color:${scoreColor(sm.avg_score ?? 100)}">${sm.avg_score ?? 100}</div>
-        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px; text-transform:uppercase">Điểm TB</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px; text-transform:uppercase">${t('healthLblAvgScore')}</div>
       </div>
     </div>`;
 
@@ -3072,12 +3101,12 @@ function renderHealthResults(d, ts) {
   const legendHtml = `
     <div style="background:var(--surface); border:1px solid var(--border); border-radius:10px;
          padding:12px 16px; margin-bottom:20px; font-size:0.78rem; color:var(--text-muted)">
-      <div style="font-weight:700; color:var(--text); margin-bottom:8px">📊 Tiêu chí đánh giá (tổng 100 điểm)</div>
+      <div style="font-weight:700; color:var(--text); margin-bottom:8px">${t('healthLblCriteria')}</div>
       <div style="display:flex; flex-wrap:wrap; gap:10px">
-        <span>🔌 Kết nối 7 ngày <strong style="color:var(--danger)">-35đ</strong></span>
-        <span>🔴 Đang offline <strong style="color:var(--danger)">-25đ</strong></span>
-        <span>⚙️ Config lỗi <strong style="color:var(--danger)">-15đ</strong></span>
-        <span>⚡ Spike hôm nay <strong style="color:var(--danger)">-10đ</strong></span>
+        <span>🔌 ${t('healthBdConnectivity')} <strong style="color:var(--danger)">-35đ</strong></span>
+        <span>🔴 ${t('healthBdOffline')} <strong style="color:var(--danger)">-25đ</strong></span>
+        <span>⚙️ ${t('healthConfigEntryErr')} <strong style="color:var(--danger)">-15đ</strong></span>
+        <span>⚡ ${t('healthBdSpike')} <strong style="color:var(--danger)">-10đ</strong></span>
       </div>
     </div>`;
 
@@ -3153,22 +3182,22 @@ function renderHealthResults(d, ts) {
         <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:10px">
           <div style="background:var(--surface2); border-radius:6px; padding:6px 8px; text-align:center">
             <div style="font-size:1rem; font-weight:700; color:var(--text)">${ig.total_entities ?? 0}</div>
-            <div style="font-size:0.65rem; color:var(--text-muted); text-transform:uppercase">Entities</div>
+            <div style="font-size:0.65rem; color:var(--text-muted); text-transform:uppercase">${t('healthLblEntities')}</div>
           </div>
           <div style="background:var(--surface2); border-radius:6px; padding:6px 8px; text-align:center">
             <div style="font-size:1rem; font-weight:700; color:${(ig.currently_unavailable ?? 0) > 0 ? 'var(--danger)' : 'var(--text)'}">${ig.currently_unavailable ?? 0}</div>
-            <div style="font-size:0.65rem; color:var(--text-muted); text-transform:uppercase">Offline</div>
+            <div style="font-size:0.65rem; color:var(--text-muted); text-transform:uppercase">${t('healthLblOffline')}</div>
           </div>
           <div style="background:var(--surface2); border-radius:6px; padding:6px 8px; text-align:center">
             <div style="font-size:1rem; font-weight:700; color:${(ig.total_reconnects_7d ?? 0) > 10 ? 'var(--warning)' : 'var(--text)'}">${ig.total_reconnects_7d ?? 0}</div>
-            <div style="font-size:0.65rem; color:var(--text-muted); text-transform:uppercase">Reconnect/7d</div>
+            <div style="font-size:0.65rem; color:var(--text-muted); text-transform:uppercase">${t('healthLblReconnect7d')}</div>
           </div>
         </div>
 
         <!-- Score breakdown (only show deductions) -->
         ${breakdownRows.length > 0 ? `
           <div style="border-top:1px solid var(--border); padding-top:8px; margin-top:2px">
-            <div style="font-size:0.7rem; font-weight:700; color:var(--text-muted); margin-bottom:6px; text-transform:uppercase">Lý do trừ điểm</div>
+            <div style="font-size:0.7rem; font-weight:700; color:var(--text-muted); margin-bottom:6px; text-transform:uppercase">${t('healthLblDeductReasons')}</div>
             ${breakdownRows.map(r => `
               <div style="display:flex; justify-content:space-between; align-items:center;
                    padding:3px 0; font-size:0.78rem; border-bottom:1px solid rgba(255,255,255,0.04)">
@@ -3178,7 +3207,7 @@ function renderHealthResults(d, ts) {
                 <span style="color:var(--danger); font-weight:700; min-width:32px; text-align:right">${r.val}</span>
               </div>`).join('')}
           </div>` : `
-          <div style="font-size:0.78rem; color:var(--success); padding:4px 0">✅ Không phát hiện vấn đề</div>`}
+          <div style="font-size:0.78rem; color:var(--success); padding:4px 0">✅ ${t('healthLblNoIssues')}</div>`}
 
         ${configWarning}
         ${problemSection}
@@ -4002,7 +4031,26 @@ const I18N = {
     healthBdOfflineDetail: '{n} entity hiện tại',
     healthBdSpike: 'Spike hôm nay',
     healthBdSpikeDetail: '{n} entity bất thường',
-    healthProblemDevicesTitle: '🔍 Thiết bị có vấn đề ({n})',},
+    healthProblemDevicesTitle: '🔍 Thiết bị có vấn đề ({n})',
+    healthConnected: '✅ Đã kết nối HA',
+    healthStatusGood: 'Tốt',
+    healthStatusWarning: 'Cảnh báo',
+    healthStatusCritical: 'Nghiêm trọng',
+    healthLblTotalIntegrations: 'Tổng Integration',
+    healthLblGood: 'Tốt',
+    healthLblWarning: 'Cảnh báo',
+    healthLblCritical: 'Nghiêm trọng',
+    healthLblAvgScore: 'Điểm TB',
+    healthLblCriteria: '📊 Tiêu chí đánh giá (tổng 100 điểm)',
+    healthLblEntities: 'Entities',
+    healthLblOffline: 'Offline',
+    healthLblReconnect7d: 'Reconnect/7d',
+    healthLblDeductReasons: 'Lý do trừ điểm',
+    healthLblNoIssues: 'Không phát hiện vấn đề',
+    addonInitFailed: 'Service khởi tạo dữ liệu — kiểm tra log HA.',
+    addonsEmptyTitle: 'Chưa có dữ liệu',
+    addonsEmptyRefreshHint: 'Nhấn <strong>Làm mới</strong> để tải thông tin Add-on.',
+    addonsNone: 'Không có Add-on nào',},
   en: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Donate',
@@ -4389,7 +4437,26 @@ const I18N = {
     healthBdOfflineDetail: '{n} entities right now',
     healthBdSpike: 'Spike today',
     healthBdSpikeDetail: '{n} unusual entities',
-    healthProblemDevicesTitle: '🔍 Problem devices ({n})',},
+    healthProblemDevicesTitle: '🔍 Problem devices ({n})',
+    healthConnected: '✅ Connected to HA',
+    healthStatusGood: 'Good',
+    healthStatusWarning: 'Warning',
+    healthStatusCritical: 'Critical',
+    healthLblTotalIntegrations: 'Total integrations',
+    healthLblGood: 'Good',
+    healthLblWarning: 'Warning',
+    healthLblCritical: 'Critical',
+    healthLblAvgScore: 'Avg score',
+    healthLblCriteria: '📊 Scoring criteria (100 points total)',
+    healthLblEntities: 'Entities',
+    healthLblOffline: 'Offline',
+    healthLblReconnect7d: 'Reconnect/7d',
+    healthLblDeductReasons: 'Deductions',
+    healthLblNoIssues: 'No issues detected',
+    addonInitFailed: 'Service failed to initialise data — check the HA log.',
+    addonsEmptyTitle: 'No data yet',
+    addonsEmptyRefreshHint: 'Press <strong>Refresh</strong> to load add-on data.',
+    addonsNone: 'No add-ons',},
   de: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Spenden',
@@ -4801,7 +4868,26 @@ const I18N = {
     healthBdOfflineDetail: '{n} Entities gerade jetzt',
     healthBdSpike: 'Spike heute',
     healthBdSpikeDetail: '{n} ungewöhnliche Entities',
-    healthProblemDevicesTitle: '🔍 Geräte mit Problemen ({n})',},
+    healthProblemDevicesTitle: '🔍 Geräte mit Problemen ({n})',
+    healthConnected: '✅ Mit HA verbunden',
+    healthStatusGood: 'Gut',
+    healthStatusWarning: 'Warnung',
+    healthStatusCritical: 'Kritisch',
+    healthLblTotalIntegrations: 'Integrationen gesamt',
+    healthLblGood: 'Gut',
+    healthLblWarning: 'Warnung',
+    healthLblCritical: 'Kritisch',
+    healthLblAvgScore: 'Ø Punktzahl',
+    healthLblCriteria: '📊 Bewertungskriterien (100 Punkte insgesamt)',
+    healthLblEntities: 'Entities',
+    healthLblOffline: 'Offline',
+    healthLblReconnect7d: 'Reconnect/7 T',
+    healthLblDeductReasons: 'Abzüge',
+    healthLblNoIssues: 'Keine Probleme erkannt',
+    addonInitFailed: 'Dienst konnte die Daten nicht initialisieren — HA-Log prüfen.',
+    addonsEmptyTitle: 'Noch keine Daten',
+    addonsEmptyRefreshHint: '<strong>Aktualisieren</strong> drücken, um Add-on-Daten zu laden.',
+    addonsNone: 'Keine Add-ons',},
   fr: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Faire un don',
@@ -5211,7 +5297,26 @@ const I18N = {
     healthBdOfflineDetail: '{n} entités actuellement',
     healthBdSpike: 'Pic aujourd’hui',
     healthBdSpikeDetail: '{n} entités inhabituelles',
-    healthProblemDevicesTitle: '🔍 Appareils en problème ({n})',},
+    healthProblemDevicesTitle: '🔍 Appareils en problème ({n})',
+    healthConnected: '✅ Connecté à HA',
+    healthStatusGood: 'Bon',
+    healthStatusWarning: 'Avertissement',
+    healthStatusCritical: 'Critique',
+    healthLblTotalIntegrations: 'Total des intégrations',
+    healthLblGood: 'Bon',
+    healthLblWarning: 'Avertissement',
+    healthLblCritical: 'Critique',
+    healthLblAvgScore: 'Score moyen',
+    healthLblCriteria: '📊 Critères de notation (100 points au total)',
+    healthLblEntities: 'Entités',
+    healthLblOffline: 'Hors ligne',
+    healthLblReconnect7d: 'Reconnex./7 j',
+    healthLblDeductReasons: 'Pénalités',
+    healthLblNoIssues: 'Aucun problème détecté',
+    addonInitFailed: 'Le service n a pas pu initialiser les données — voir le journal HA.',
+    addonsEmptyTitle: 'Pas encore de données',
+    addonsEmptyRefreshHint: 'Appuyez sur <strong>Actualiser</strong> pour charger les données des add-ons.',
+    addonsNone: 'Aucun add-on',},
   nl: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Doneren',
@@ -5622,7 +5727,26 @@ const I18N = {
     healthBdOfflineDetail: '{n} apparaten nu',
     healthBdSpike: 'Piek vandaag',
     healthBdSpikeDetail: '{n} ongebruikelijke apparaten',
-    healthProblemDevicesTitle: '🔍 Apparaten met problemen ({n})',},
+    healthProblemDevicesTitle: '🔍 Apparaten met problemen ({n})',
+    healthConnected: '✅ Verbonden met HA',
+    healthStatusGood: 'Goed',
+    healthStatusWarning: 'Waarschuwing',
+    healthStatusCritical: 'Kritiek',
+    healthLblTotalIntegrations: 'Integraties totaal',
+    healthLblGood: 'Goed',
+    healthLblWarning: 'Waarschuwing',
+    healthLblCritical: 'Kritiek',
+    healthLblAvgScore: 'Gem. score',
+    healthLblCriteria: '📊 Scorecriteria (100 punten totaal)',
+    healthLblEntities: 'Entiteiten',
+    healthLblOffline: 'Offline',
+    healthLblReconnect7d: 'Herverbinding/7d',
+    healthLblDeductReasons: 'Aftrekkingen',
+    healthLblNoIssues: 'Geen problemen gevonden',
+    addonInitFailed: 'Dienst kon de gegevens niet initialiseren — controleer het HA-log.',
+    addonsEmptyTitle: 'Nog geen gegevens',
+    addonsEmptyRefreshHint: 'Druk op <strong>Vernieuwen</strong> om add-ongegevens te laden.',
+    addonsNone: 'Geen add-ons',},
   pl: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Wsparcie',
@@ -6033,7 +6157,26 @@ const I18N = {
     healthBdOfflineDetail: '{n} encji teraz',
     healthBdSpike: 'Skok dzisiaj',
     healthBdSpikeDetail: '{n} nietypowych encji',
-    healthProblemDevicesTitle: '🔍 Urządzenia z problemami ({n})',},
+    healthProblemDevicesTitle: '🔍 Urządzenia z problemami ({n})',
+    healthConnected: '✅ Połączono z HA',
+    healthStatusGood: 'Dobry',
+    healthStatusWarning: 'Ostrzeżenie',
+    healthStatusCritical: 'Krytyczny',
+    healthLblTotalIntegrations: 'Liczba integracji',
+    healthLblGood: 'Dobry',
+    healthLblWarning: 'Ostrzeżenie',
+    healthLblCritical: 'Krytyczny',
+    healthLblAvgScore: 'Śr. wynik',
+    healthLblCriteria: '📊 Kryteria oceny (100 punktów)',
+    healthLblEntities: 'Encje',
+    healthLblOffline: 'Offline',
+    healthLblReconnect7d: 'Reconnect/7 d',
+    healthLblDeductReasons: 'Odliczenia',
+    healthLblNoIssues: 'Nie wykryto problemów',
+    addonInitFailed: 'Usługa nie zainicjalizowała danych — sprawdź log HA.',
+    addonsEmptyTitle: 'Brak danych',
+    addonsEmptyRefreshHint: 'Naciśnij <strong>Odśwież</strong>, aby wczytać dane dodatków.',
+    addonsNone: 'Brak dodatków',},
   sv: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Donera',
@@ -6444,7 +6587,26 @@ const I18N = {
     healthBdOfflineDetail: '{n} entiteter just nu',
     healthBdSpike: 'Spike idag',
     healthBdSpikeDetail: '{n} ovanliga entiteter',
-    healthProblemDevicesTitle: '🔍 Enheter med problem ({n})',},
+    healthProblemDevicesTitle: '🔍 Enheter med problem ({n})',
+    healthConnected: '✅ Ansluten till HA',
+    healthStatusGood: 'Bra',
+    healthStatusWarning: 'Varning',
+    healthStatusCritical: 'Kritisk',
+    healthLblTotalIntegrations: 'Totalt integrationer',
+    healthLblGood: 'Bra',
+    healthLblWarning: 'Varning',
+    healthLblCritical: 'Kritisk',
+    healthLblAvgScore: 'Snittpoäng',
+    healthLblCriteria: '📊 Bedömningskriterier (100 poäng totalt)',
+    healthLblEntities: 'Entiteter',
+    healthLblOffline: 'Offline',
+    healthLblReconnect7d: 'Återansl./7 d',
+    healthLblDeductReasons: 'Avdrag',
+    healthLblNoIssues: 'Inga problem hittade',
+    addonInitFailed: 'Tjänsten kunde inte initiera data — kontrollera HA-loggen.',
+    addonsEmptyTitle: 'Inga data än',
+    addonsEmptyRefreshHint: 'Tryck <strong>Uppdatera</strong> för att läsa in tilläggsdata.',
+    addonsNone: 'Inga tillägg',},
   hu: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Adományozás',
@@ -6855,7 +7017,26 @@ const I18N = {
     healthBdOfflineDetail: '{n} entitás most',
     healthBdSpike: 'Csúcs ma',
     healthBdSpikeDetail: '{n} szokatlan entitás',
-    healthProblemDevicesTitle: '🔍 Problémás eszközök ({n})',},
+    healthProblemDevicesTitle: '🔍 Problémás eszközök ({n})',
+    healthConnected: '✅ Csatlakozva a HA-hoz',
+    healthStatusGood: 'Jó',
+    healthStatusWarning: 'Figyelmeztetés',
+    healthStatusCritical: 'Kritikus',
+    healthLblTotalIntegrations: 'Integrációk összesen',
+    healthLblGood: 'Jó',
+    healthLblWarning: 'Figyelmeztetés',
+    healthLblCritical: 'Kritikus',
+    healthLblAvgScore: 'Átlagpontszám',
+    healthLblCriteria: '📊 Értékelési szempontok (összesen 100 pont)',
+    healthLblEntities: 'Entitások',
+    healthLblOffline: 'Nem elérhető',
+    healthLblReconnect7d: 'Újracsatl./7 n',
+    healthLblDeductReasons: 'Pontlevonások',
+    healthLblNoIssues: 'Nem található probléma',
+    addonInitFailed: 'A szolgáltatás nem tudta inicializálni az adatokat — nézd meg a HA naplót.',
+    addonsEmptyTitle: 'Még nincs adat',
+    addonsEmptyRefreshHint: 'A <strong>Frissítés</strong> gombbal tölthető be a kiegészítők adatai.',
+    addonsNone: 'Nincsenek kiegészítők',},
   cs: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Podpořit',
@@ -7266,7 +7447,26 @@ const I18N = {
     healthBdOfflineDetail: '{n} entit právě teď',
     healthBdSpike: 'Špička dnes',
     healthBdSpikeDetail: '{n} neobvyklých entit',
-    healthProblemDevicesTitle: '🔍 Zařízení s problémy ({n})',},
+    healthProblemDevicesTitle: '🔍 Zařízení s problémy ({n})',
+    healthConnected: '✅ Připojeno k HA',
+    healthStatusGood: 'Dobré',
+    healthStatusWarning: 'Varování',
+    healthStatusCritical: 'Kritické',
+    healthLblTotalIntegrations: 'Celkem integrací',
+    healthLblGood: 'Dobré',
+    healthLblWarning: 'Varování',
+    healthLblCritical: 'Kritické',
+    healthLblAvgScore: 'Prům. skóre',
+    healthLblCriteria: '📊 Kritéria hodnocení (celkem 100 bodů)',
+    healthLblEntities: 'Entity',
+    healthLblOffline: 'Offline',
+    healthLblReconnect7d: 'Reconnect/7 d',
+    healthLblDeductReasons: 'Srážky',
+    healthLblNoIssues: 'Žádné problémy',
+    addonInitFailed: 'Služba nedokázala inicializovat data — zkontrolujte log HA.',
+    addonsEmptyTitle: 'Zatím žádná data',
+    addonsEmptyRefreshHint: 'Stiskněte <strong>Obnovit</strong> pro načtení dat doplňků.',
+    addonsNone: 'Žádné doplňky',},
   it: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Donazione',
@@ -7677,7 +7877,26 @@ const I18N = {
     healthBdOfflineDetail: '{n} entità adesso',
     healthBdSpike: 'Picco oggi',
     healthBdSpikeDetail: '{n} entità insolite',
-    healthProblemDevicesTitle: '🔍 Dispositivi problematici ({n})',},
+    healthProblemDevicesTitle: '🔍 Dispositivi problematici ({n})',
+    healthConnected: '✅ Connesso a HA',
+    healthStatusGood: 'Buono',
+    healthStatusWarning: 'Avviso',
+    healthStatusCritical: 'Critico',
+    healthLblTotalIntegrations: 'Totale integrazioni',
+    healthLblGood: 'Buono',
+    healthLblWarning: 'Avviso',
+    healthLblCritical: 'Critico',
+    healthLblAvgScore: 'Punteggio medio',
+    healthLblCriteria: '📊 Criteri di valutazione (100 punti totali)',
+    healthLblEntities: 'Entità',
+    healthLblOffline: 'Offline',
+    healthLblReconnect7d: 'Riconness./7g',
+    healthLblDeductReasons: ' Penalità',
+    healthLblNoIssues: 'Nessun problema rilevato',
+    addonInitFailed: 'Il servizio non è riuscito a inizializzare i dati — controlla il log HA.',
+    addonsEmptyTitle: 'Ancora nessun dato',
+    addonsEmptyRefreshHint: 'Premi <strong>Aggiorna</strong> per caricare i dati degli add-on.',
+    addonsNone: 'Nessun add-on',},
   pt: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Doação',
@@ -8087,7 +8306,26 @@ const I18N = {
     healthBdOfflineDetail: '{n} entidades agora',
     healthBdSpike: 'Pico hoje',
     healthBdSpikeDetail: '{n} entidades incomuns',
-    healthProblemDevicesTitle: '🔍 Dispositivos com problema ({n})',},
+    healthProblemDevicesTitle: '🔍 Dispositivos com problema ({n})',
+    healthConnected: '✅ Conectado ao HA',
+    healthStatusGood: 'Bom',
+    healthStatusWarning: 'Aviso',
+    healthStatusCritical: 'Crítico',
+    healthLblTotalIntegrations: 'Total de integrações',
+    healthLblGood: 'Bom',
+    healthLblWarning: 'Aviso',
+    healthLblCritical: 'Crítico',
+    healthLblAvgScore: 'Pontuação média',
+    healthLblCriteria: '📊 Critérios de pontuação (100 pontos no total)',
+    healthLblEntities: 'Entidades',
+    healthLblOffline: 'Offline',
+    healthLblReconnect7d: 'Reconex./7d',
+    healthLblDeductReasons: 'Deduções',
+    healthLblNoIssues: 'Nenhum problema detetado',
+    addonInitFailed: 'O serviço não conseguiu inicializar os dados — verifique o log do HA.',
+    addonsEmptyTitle: 'Ainda sem dados',
+    addonsEmptyRefreshHint: 'Prima <strong>Atualizar</strong> para carregar os dados dos add-ons.',
+    addonsNone: 'Nenhum add-on',},
   sl: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Podpri',
@@ -8498,7 +8736,26 @@ const I18N = {
     healthBdOfflineDetail: '{n} entitet zdaj',
     healthBdSpike: 'Skok danes',
     healthBdSpikeDetail: '{n} nenavadnih entitet',
-    healthProblemDevicesTitle: '🔍 Naprave s težavami ({n})',},
+    healthProblemDevicesTitle: '🔍 Naprave s težavami ({n})',
+    healthConnected: '✅ Povezano z HA',
+    healthStatusGood: 'Dobro',
+    healthStatusWarning: 'Opozorilo',
+    healthStatusCritical: 'Kritično',
+    healthLblTotalIntegrations: 'Skupaj integracij',
+    healthLblGood: 'Dobro',
+    healthLblWarning: 'Opozorilo',
+    healthLblCritical: 'Kritično',
+    healthLblAvgScore: 'Povp. ocena',
+    healthLblCriteria: '📊 Merila ocenjevanja (skupaj 100 točk)',
+    healthLblEntities: 'Entitete',
+    healthLblOffline: 'Offline',
+    healthLblReconnect7d: 'Povezave/7 d',
+    healthLblDeductReasons: 'Odbitski',
+    healthLblNoIssues: 'Ni zaznanih težav',
+    addonInitFailed: 'Storitev ni mogla inicializirati podatkov — preverite dnevnik HA.',
+    addonsEmptyTitle: 'Še ni podatkov',
+    addonsEmptyRefreshHint: 'Pritisnite <strong>Osveži</strong> za nalaganje podatkov dodatkov.',
+    addonsNone: 'Ni dodatkov',},
 
   zh: {
     appTitle: '🧹 HA Optimizer',
@@ -8904,13 +9161,32 @@ const I18N = {
     healthBdOfflineDetail: '目前 {n} 个实体',
     healthBdSpike: '今天尖峰',
     healthBdSpikeDetail: '{n} 个异常实体',
-    healthProblemDevicesTitle: '🔍 问题设备({n})',},};
+    healthProblemDevicesTitle: '🔍 问题设备({n})',
+    healthConnected: '✅ 已连接 HA',
+    healthStatusGood: '良好',
+    healthStatusWarning: '警告',
+    healthStatusCritical: '严重',
+    healthLblTotalIntegrations: '集成总数',
+    healthLblGood: '良好',
+    healthLblWarning: '警告',
+    healthLblCritical: '严重',
+    healthLblAvgScore: '平均分',
+    healthLblCriteria: '📊 评分标准(总分 100)',
+    healthLblEntities: '实体',
+    healthLblOffline: '离线',
+    healthLblReconnect7d: '7 天重连',
+    healthLblDeductReasons: '扣分原因',
+    healthLblNoIssues: '未发现问题',
+    addonInitFailed: '服务初始化数据失败 —— 请查看 HA 日志。',
+    addonsEmptyTitle: '暂无数据',
+    addonsEmptyRefreshHint: '点击<strong>刷新</strong>加载插件信息。',
+    addonsNone: '暂无插件',},};
 
-let currentLang = 'vi';
+let currentLang = 'en';
 
 function t(key, params) {
-  const dict = I18N[currentLang] || I18N['vi'];
-  let val = dict[key] ?? I18N['vi'][key] ?? key;
+  const dict = I18N[currentLang] || I18N['en'] || I18N['vi'];
+  let val = dict[key] ?? I18N['en']?.[key] ?? I18N['vi']?.[key] ?? key;
   if (typeof val === 'function') return val(params);
   if (params && typeof val === 'string') {
     val = val.replace(/\{(\w+)\}/g, (_, k) => (params[k] !== undefined ? params[k] : `{${k}}`));
@@ -9043,9 +9319,7 @@ function _applyTranslations() {
   const h1 = document.querySelector('.topbar h1');
   if (h1) h1.innerHTML = `<span class="icon">🧹</span> ${t('appTitle').replace('🧹 ', '')}`;
 
-  // ── Donate button
-  const donateSpan = document.querySelector('#btnDonate [data-i18n="donate"]');
-  if (donateSpan) donateSpan.textContent = t('donate');
+  // ── Donate button removed at the user's request; nothing to re-apply here.
 
   // ── Ticker
   const ticker = document.querySelector('.ticker-text');
@@ -9148,6 +9422,12 @@ function _applyTranslations() {
   _descSpan('deadcodeDescSpan', 'deadcodeDesc');
   _descSpan('healthDescSpan', 'healthDesc');
 
+  // ── Add-ons empty state (text set here, not via data-i18n)
+  const addonTitle = _el('addonEmptyTitle');
+  if (addonTitle) addonTitle.textContent = t('addonsEmptyTitle');
+  const addonHint = _el('addonEmptyHint');
+  if (addonHint) addonHint.innerHTML = t('addonsEmptyRefreshHint');
+
   // ── Fingerprint tab description
   const fpDescDiv = _el('fingerprintDescDiv');
   if (fpDescDiv) fpDescDiv.innerHTML = `${t('fingerprintDesc')} <span style="color:var(--primary)" id="fingerprintCollectHintSpan">${t('fingerprintCollectHint')}</span>`;
@@ -9177,6 +9457,11 @@ function _applyTranslations() {
   if (btnConfirmPurge) btnConfirmPurge.textContent = t('modalConfirmDelete');
   const depSectionTitle = _el('depSectionTitle');
   if (depSectionTitle) depSectionTitle.innerHTML = `⚡ <span data-i18n="impactAnalysis">${t('impactAnalysis')}</span>`;
+
+  // ── Theme menu: its items are built with t(), so it must be rebuilt when the
+  // language changes. Without this the menu keeps the language it was first
+  // rendered in (Vietnamese, the old hardcoded default) forever.
+  if (typeof buildThemeMenu === 'function') buildThemeMenu();
 
   // ── Connection status text update
   _updateConnStatus();
@@ -9304,7 +9589,7 @@ async function loadAddonTab() {
   try {
     const raw  = await callService('ha_optimizer', 'analyze_addons', {});
     const data = extractData(raw);
-    if (!data)      throw new Error('Service không trả dữ liệu — kiểm tra log HA.');
+    if (!data)      throw new Error(t('addonInitFailed'));
     if (data.error) throw new Error(data.error);
 
     _lastAddonData = data;
@@ -9454,7 +9739,7 @@ function _statusBadge(a) {
 function _renderAddonList(addons) {
   const wrap = document.getElementById('addonListWrap');
   if (!addons.length) {
-    wrap.innerHTML = `<div class="empty-state"><div class="icon">🧩</div><h3>Không có Add-on nào</h3></div>`;
+    wrap.innerHTML = `<div class="empty-state"><div class="icon">🧩</div><h3>${t('addonsNone')}</h3></div>`;
     return;
   }
   addons.sort((a,b) => {
@@ -9535,7 +9820,10 @@ window.addEventListener('resize', () => {
 
 function loadSavedLang() {
   try {
-    const saved = localStorage.getItem('ha_optimizer_lang') || 'vi';
+    const hadStored = (() => {
+      try { return !!localStorage.getItem('ha_optimizer_lang'); } catch (e) { return false; }
+    })();
+    const saved = _resolveInitialLang();
     buildLangMenu();
     const lang = LANGUAGES.find(l => l.code === saved) || LANGUAGES[0];
     currentLang = lang.code;
@@ -9545,7 +9833,26 @@ function loadSavedLang() {
       const el = document.getElementById('langopt-' + l.code);
       if (el) el.classList.toggle('active', l.code === currentLang);
     });
-    if (saved !== 'vi') _applyTranslations();
+    // The static shell ships in Vietnamese, so anything else needs a re-apply.
+    if (currentLang !== 'vi') _applyTranslations();
+    // The parent document may not expose <home-assistant> yet at
+    // DOMContentLoaded, in which case _haLanguage() returned null. Retry once
+    // and adopt HA's language if it turns out to be available.
+    if (!hadStored) {
+      setTimeout(() => {
+        const ha = _haLanguage();
+        if (ha && ha !== currentLang) {
+          currentLang = ha;
+          const l2 = LANGUAGES.find(x => x.code === ha);
+          if (l2) {
+            buildLangMenu();
+            document.getElementById('langCurrentFlag').textContent = l2.flag;
+            document.getElementById('langCurrentName').textContent = l2.name;
+          }
+          _applyTranslations();
+        }
+      }, 700);
+    }
   } catch(e) { buildLangMenu(); }
 }
 
