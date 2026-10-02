@@ -32,6 +32,32 @@ SIGMA_THRESHOLD = 2.0       # standard deviations to consider an anomaly
 IQR_MULTIPLIER = 1.5        # IQR multiplier when insufficient days
 
 
+async def _run_in_db_executor(hass: HomeAssistant, target, *args):
+    """Run a recorder query on the recorder's own executor.
+
+    Home Assistant distinguishes the recorder executor from the general
+    purpose one, and says so in the log:
+
+      Detected that custom integration 'ha_optimizer' accesses the database
+      without the database executor
+
+    It is not cosmetic. Recorder work on the general executor competes with
+    the recorder's own writes for the same connection, and holding the
+    general executor stalls unrelated work. `scanner.py` has done this
+    correctly from the start; this module did not, and both of its queries
+    were flagged.
+
+    `get_instance()` raises when recorder is not set up, so catching here
+    keeps the graceful degradation the callers already expect.
+    """
+    try:
+        from homeassistant.components.recorder import get_instance
+        return await get_instance(hass).async_add_executor_job(target, *args)
+    except Exception as exc:  # noqa: BLE001 - degrade, never break the caller
+        _LOGGER.warning("Recorder database unavailable, skipping: %s", exc)
+        return None
+
+
 # ================================================================
 # FINGERPRINT STORE
 # ================================================================
@@ -82,8 +108,8 @@ class DailyProfiler:
         self.hass = hass
 
     async def async_profile_yesterday(self) -> dict | None:
-        """Query DB và trả về dict metrics cho ngày hôm qua."""
-        return await self.hass.async_add_executor_job(self._run)
+        """Query DB for yesterday's metrics, on the recorder's executor."""
+        return await _run_in_db_executor(self.hass, self._run)
 
     def _run(self) -> dict | None:
         try:
@@ -495,8 +521,9 @@ class FingerprintAnalyzer:
             _LOGGER.warning("FingerprintAnalyzer: failed to collect baseline for yesterday")
 
     async def _profile_today(self) -> dict | None:
-        """Profiler cho ngày hôm nay (từ 00:00 đến giờ hiện tại)."""
-        return await self.hass.async_add_executor_job(self._run_today)
+        """Profile today, from midnight to now. Recorder executor - see
+        _run_in_db_executor for why the general one is not good enough."""
+        return await _run_in_db_executor(self.hass, self._run_today)
 
     def _run_today(self) -> dict | None:
         try:

@@ -1030,6 +1030,7 @@
       <div style="min-width:0;flex:1">
         <div id="sysbar_os" style="font-size:0.78rem;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div>
         <div id="sysbar_ha" style="font-size:0.68rem;color:var(--primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+        <div id="sysbarNote" style="font-size:0.62rem;color:var(--text-muted);display:none"></div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
         <button class="btn btn-primary" onclick="loadAddonTab()" id="btnAddonRefresh" style="padding:5px 12px;font-size:0.78rem">🔄 <span data-i18n="addonRefresh">Refresh</span></button>
@@ -4210,6 +4211,7 @@ const I18N = {
     fp_unit_entities: 'entities',
     // ── Addon tab
     addonLoading: 'Loading add-ons…',
+    sysbarUnavailable: 'Host stats not available on this install',
     addonRefresh: 'Refresh',
     addonUpdate: 'Update',
     addonRunning: 'Running',
@@ -4672,6 +4674,7 @@ const I18N = {
     fp_unit_times: '次',
     fp_unit_entities: '个实体',
     addonLoading: '正在加载插件…',
+    sysbarUnavailable: '此环境不提供主机资源数据',
     addonRefresh: '刷新',
     addonUpdate: '更新',
     addonRunning: '运行中',
@@ -5106,24 +5109,58 @@ function _patchAddonStats(addons) {
 let _sysbarTimer = null;
 const SYSBAR_INTERVAL = 10000; // refresh every 10 s
 
+let _sysbarUnavailableSince = 0;   // 0 = still working
+const SYSBAR_BACKOFF_MS = 60000;   // when unsupported, stop asking so often
+
 async function _fetchSysBarOnly() {
+  // Once the Supervisor has told us it cannot do this, stop asking every ten
+  // seconds. It used to re-render the gauges from an empty payload on each
+  // pass, which blanked the CPU/RAM/disk numbers to "—" once a poll - a blink
+  // right across the top of the page, several times a minute, forever.
+  if (_sysbarUnavailableSince && Date.now() - _sysbarUnavailableSince < SYSBAR_BACKOFF_MS) {
+    return;
+  }
   try {
     const raw  = await callService('ha_optimizer', 'analyze_addons', {});
     const data = extractData(raw);
-    if (data && !data.error) {
-      _lastAddonData = data;
-      _renderSysBar(data.host || {});
-      // Update clock on sysbar
-      const ts = document.getElementById('addonLastRefresh');
-      if (ts) ts.textContent = '🕐 ' + new Date().toLocaleTimeString();
-      // If we're also on the addon tab, patch live addon rows too
-      const addonTabVisible = document.getElementById('tabAddon') &&
-        document.getElementById('tabAddon').style.display !== 'none';
-      if (addonTabVisible) _patchAddonStats(data.addons || []);
+    if (!data) return;
+    if (data.error || (!data.host || !Object.keys(data.host).length)) {
+      // unsupported / unavailable: keep the last known numbers, mark it once
+      if (!_sysbarUnavailableSince) {
+        _sysbarUnavailableSince = Date.now();
+        _setSysbarUnavailable();
+      }
+      return;
     }
+    _sysbarUnavailableSince = 0;
+    _setSysbarUnavailable(false);
+    _lastAddonData = data;
+    _renderSysBar(data.host || {});
+    // Update clock on sysbar
+    const ts = document.getElementById('addonLastRefresh');
+    if (ts) ts.textContent = '🕐 ' + new Date().toLocaleTimeString(_panelLocale());
+    // If we're also on the addon tab, patch live addon rows too
+    const addonTabVisible = document.getElementById('tabAddon') &&
+      document.getElementById('tabAddon').style.display !== 'none';
+    if (addonTabVisible) _patchAddonStats(data.addons || []);
   } catch(e) {
     console.debug('[SysBar] fetch failed:', e.message);
   }
+}
+
+// Marks the strip as unavailable WITHOUT wiping the last real reading.
+function _setSysbarUnavailable(isUnavailable = true) {
+  const note = document.getElementById('sysbarNote');
+  if (note) {
+    note.textContent = isUnavailable ? t('sysbarUnavailable') : '';
+    note.style.display = isUnavailable ? 'inline' : 'none';
+  }
+  if (!isUnavailable) return;
+  // dim the values instead of blanking them
+  ['sysbar_cpu_val', 'sysbar_ram_val', 'sysbar_disk_val'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.opacity = '0.45';
+  });
 }
 
 // Start the always-on sysbar loop (called once at page load)

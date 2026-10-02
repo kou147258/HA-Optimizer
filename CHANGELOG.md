@@ -7,6 +7,21 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ---
 
+## [1.7.1] - 2026-10-03
+
+Three defects a live log dump on a real install exposed. None of them was a crash, which is exactly why it showed up as a panel that flickers rather than as an error.
+
+### Fixed
+- 🗄️ **`fingerprint.py` ran its recorder queries on the general-purpose executor.** Home Assistant says so itself, by file and line: *"Detected that custom integration 'ha_optimizer' accesses the database without the database executor"* — twice, at `fingerprint.py:116` and `fingerprint.py:528`. `scanner.py` has had a recorder-executor helper from the start; this module never got converted, and the cost is not cosmetic: recorder work on the general executor competes with the recorder's own writes for the same connection. Both call sites now share one module-level helper that also degrades cleanly when recorder is not set up.
+- 📉 **The top strip blanked itself every ten seconds.** The panel polls `analyze_addons` every 10 s on every tab, and rendered whatever came back. On an install whose Supervisor has no `/host/stats` — which is most of them — that is an empty payload, so CPU / RAM / disk were reset to `—` ten times a minute, indefinitely, and the backend logged the same 404 as a warning each time: **23 identical lines in four minutes** in the log dump. It now keeps the last known reading, dims it, says 「此环境不提供主机资源数据」 once, and backs off to once a minute instead of hammering an endpoint that will never answer.
+- 🔇 **A missing Supervisor endpoint was logged as an event rather than a fact.** A 404 there means "this installation does not expose that endpoint" — announced once at INFO. Other supervisor failures are throttled rather than repeated every ten seconds, so an unreachable Supervisor cannot flood the log either.
+- 🧪 **Two guard suites were never actually in CI.** An earlier edit printed "added to CI" while the string replace had silently matched nothing; the retry matched the *last* run step in the file, which lives in the release job, and truncated that job's `run: |` block. Both steps are in the `i18n` job now, verified by parsing the workflow back.
+
+### Not a defect
+- `Replaced a stale panel.html under www/ (247217 → 261243 bytes)` in the same log is the content-based copy from 1.5.2 doing exactly its job on the upgrade. One occurrence, no action needed.
+
+---
+
 ## [1.7.0] - 2026-10-02
 
 The trash becomes something you drive. Two bulk operations, a countdown on

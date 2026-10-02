@@ -56,6 +56,38 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = []
 
 
+# ── log throttling ─────────────────────────────────────────────────────────
+# The panel polls analyze_addons every 10 seconds on every tab, so anything
+# that fails there fails 360 times an hour. A warning per failure turned an
+# unsupported Supervisor endpoint into a wall of identical log lines, which
+# buries the messages that matter.
+_WARNED_ONCE: set[str] = set()
+_LAST_WARNED: dict[str, float] = {}
+_WARN_THROTTLE_SECONDS = 300.0
+
+
+def _missing_endpoint(path: str) -> None:
+    """Announce an endpoint this Supervisor does not have, exactly once."""
+    if path in _WARNED_ONCE:
+        return
+    _WARNED_ONCE.add(path)
+    _LOGGER.info(
+        "Supervisor has no %s endpoint - resource gauges will stay empty. "
+        "This is normal on installs that do not expose host stats.",
+        path,
+    )
+
+
+def _log_throttled(key: str, log, msg: str, *args) -> None:
+    """Log at most once per key per _WARN_THROTTLE_SECONDS."""
+    now = time.monotonic()
+    last = _LAST_WARNED.get(key)
+    if last is not None and now - last < _WARN_THROTTLE_SECONDS:
+        return
+    _LAST_WARNED[key] = now
+    log(msg, *args)
+
+
 class _Cooperative:
     """Yield to the event loop on a TIME budget rather than a fixed item count.
 
@@ -540,10 +572,20 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
         T_SLOW = aiohttp.ClientTimeout(total=15)
 
         async def _get(session, path, timeout=T_FAST):
-            """GET supervisor path → data dict (or {} on failure). Logs raw keys for debugging."""
+            """GET supervisor path → data dict (or {} on failure).
+
+            A missing endpoint is a property of the installation, not an event:
+            `/host/stats` does not exist on every Supervisor, and the panel
+            polls this every 10 seconds on every tab. Logging it as a warning
+            each time filled the log with 20+ identical lines in four minutes,
+            so an unsupported endpoint is now announced once at INFO and then
+            stays quiet. Genuine failures (connection refused, timeouts) still
+            warn, and are also rate-limited so a Supervisor that is down does
+            not turn into a warning every ten seconds either.
+            """
             try:
                 async with session.get(f"{base}{path}", headers=headers, timeout=timeout) as r:
-                    _LOGGER.debug("Supervisor GET %s → HTTP %s", path, r.status)
+                    _LOGGER.debug("Supervisor GET %s -> HTTP %s", path, r.status)
                     if r.status == 200:
                         body = await r.json()
                         data = body.get("data", {})
@@ -551,9 +593,22 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
                         return data
                     else:
                         text = await r.text()
-                        _LOGGER.warning("Supervisor GET %s → %s: %s", path, r.status, text[:200])
+                        # 404 means this Supervisor has no such endpoint -
+                        # a fact about the installation, announced once.
+                        if r.status == 404:
+                            _missing_endpoint(path)
+                        else:
+                            _log_throttled(
+                                f"http{r.status}:{path}",
+                                _LOGGER.warning,
+                                "Supervisor GET %s -> %s: %s", path, r.status, text[:200],
+                            )
             except Exception as exc:
-                _LOGGER.warning("Supervisor GET %s failed: %s", path, exc)
+                _log_throttled(
+                    f"exc:{path}:{type(exc).__name__}",
+                    _LOGGER.warning,
+                    "Supervisor GET %s failed: %s", path, exc,
+                )
             return {}
 
         def _mb(val):

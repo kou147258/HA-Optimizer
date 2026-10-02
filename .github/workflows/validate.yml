@@ -38,6 +38,12 @@ jobs:
       - name: Trash bulk-operation regression tests
         run: python3 tools/test_trash_bulk.py
 
+      - name: Compatibility claim checks
+        run: python3 tools/test_compat_claims.py
+
+      - name: Live-log regression checks
+        run: python3 tools/test_live_log_findings.py
+
   # ── HACS Validation ──────────────────────────────────────────────────────────
   hacs-validate:
     name: HACS Validation
