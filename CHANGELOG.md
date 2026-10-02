@@ -23,6 +23,9 @@ version, and both fail quietly rather than loudly.
 ### Not changed
 - `purge` and `restore` are deliberately not part of this release's live testing. They were exercised only as far as their schema gate (`purge` with no `entity_ids` → HTTP 400, handler never runs; `purge` with an empty list → 200 and nothing deleted). The destructive path is still covered only by the 17 checks in `tools/test_purge_safety.py`.
 
+### Correction to the 1.5.2 release notes
+- 📝 The published notes said the analysis services "persist their results either way, so you can also fire one on a schedule and read the outcome later from the panel". **That is wrong, and it was checked rather than assumed.** `handle_analyze_*` is `return await analyzer.async_analyze()` and nothing more; only `handle_scan` (`async_save_scan_results`) and `collect_baseline` (fingerprint store) write anything. Verified on a live instance: after running all seven analyzers, `get_results` still reports exactly `results, soft_deleted, statistics` — no analyzer output appears anywhere. So a scheduled `analyze_health` runs the analysis and throws the result away. The `OPTIONAL` change is still correct — the services were returning HTTP 400 to every caller that could not ask for a response — but its practical reach is the panel and any tool that can surface a response, not automations looking for stored results. The README now says this per service instead of implying otherwise.
+
 ---
 
 ## [1.5.1] - 2026-10-02

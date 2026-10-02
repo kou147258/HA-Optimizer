@@ -364,7 +364,10 @@ automation:
 | `ha_optimizer.analyze_addons` | Add-on list + live CPU/RAM + host resource data |
 | `ha_optimizer.collect_baseline` | Manual baseline snapshot collection |
 
-> **All twelve can be called from an automation, a script or Developer Tools → Actions.** The ten read-only ones additionally return their result as a service response, so `response_variable:` gives you the data inline — but they persist their results either way, so you can also fire one on a schedule and read the outcome later from the panel.
+> **All twelve can be called from an automation, a script or Developer Tools → Actions** — none of them is blocked. What that is worth differs per service:
+>
+> - `scan` and `collect_baseline` **write their results to storage**, so scheduling them is genuinely useful; the panel reads what they stored.
+> - The seven `analyze_*` services and `get_results` are **compute-and-return**: they answer with the data and store nothing. A scheduled call from an automation runs the analysis and discards the result. Use these from the panel, or from a tool that can surface a service response.
 
 ---
 
