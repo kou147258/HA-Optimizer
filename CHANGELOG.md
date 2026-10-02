@@ -7,13 +7,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ---
 
-## [Unreleased]
+## [1.3.0] - 2026-10-02
 
 ### Added
 - 🇨🇳 **简体中文 (zh-CN)** — full translation of all 380 UI keys, added as the 13th interface language. Covers every label, button, message, placeholder, theme description, card-type description and fingerprint metric, including the 25 parameterised (`(n) => ...`) entries.
 - 🔧 **`tools/check_i18n.py`** — dependency-free guard that fails when a language drifts from the `en` reference (missing/extra keys, mismatched `{placeholders}` or HTML tags, backend keys no dictionary defines, `t()` call sites with unknown keys). Wired into CI as the `i18n Consistency` job and as a release gate.
 
 ### Fixed
+- 🏷️ **Version numbers now agree.** `manifest.json` said `1.2.2` while `const.py` and both READMEs still said `1.0.0`, so the sidebar and the docs could not be reconciled with what HACS installs. All four now read `1.3.0`. (The `1.0.0` release date in this changelog was also a year off — v1.0 was published 2026-04-21, not 2025-04-19 — and is corrected.)
 - 🛑 **Recorder database access no longer runs on the wrong executor.** Every analysis (`scan`, `analyze_recorder`, `analyze_dashboard`, `analyze_storms`, `analyze_health`) read the recorder database via `hass.async_add_executor_job()`. Home Assistant flags that as *"Detected that custom integration 'ha_optimizer' accesses the database without the database executor"* — the query runs on the general-purpose pool instead of the recorder's own, so it contends with the recorder's own writes for the connection. All six database-touching entry points now dispatch through `get_instance(hass).async_add_executor_job()` via a new `_async_run_in_db_executor()` helper, which keeps the previous graceful degradation if recorder is not set up. The two filesystem scans (`_scan_references`, `AutomationDeadCodeTracer._run`, which reads `.storage/core.automation`) deliberately stay on the general executor — putting them on the recorder's would cause the contention in the other direction.
 - 🌍 **Eight of the thirteen dictionaries were showing a different language in the Dashboard tab.** The `dashLbl*` label family had been shuffled between dictionaries and six of them ended up holding someone else's text, with the chain running fr→German, nl→French, pl→Dutch, sv→Polish, hu→Swedish, cs→Hungarian; Italian and Slovenian had a second, foreign copy of the whole family pasted in after their own. Every one of them had a complete, correct key set, so key parity, placeholder parity and `t()` resolution all passed — the dashboard just rendered "Kritisch" to a French user and "Entités manquantes" to a Dutch one. All eight are now written in their own language, and `check_i18n.py` gained a vocabulary-drift check that compares each language's `dashLbl*` words against its own other keys; it names all eight on the pre-fix tree and stays quiet afterwards.
 - 🇨🇿🇻🇳🇵🇱 Removed the duplicate-key defect described below for Italian (a Czech block overriding it) and Slovenian (a Portuguese block overriding it); Polish, French, Dutch, Swedish, Hungarian and Czech had the wrong language in the only copy.
@@ -28,7 +29,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ---
 
-## [1.0.0] - 2025-04-19
+## [1.0.0] - 2026-04-21
 
 ### Added
 - 🔍 **Smart Entity Scanner** — full scan of entities, automations, scripts and helpers with risk-level scoring (Low / Medium / High) and a `health_score` (0–100) for the HA instance
