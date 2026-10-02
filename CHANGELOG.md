@@ -7,14 +7,26 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ---
 
+## [1.5.1] - 2026-10-02
+
+The fork takes over as the maintained line. The original project has been
+unmaintained since April 2026, so the links that pointed users at it now point
+here instead. No behaviour change.
+
+### Changed
+- 🔗 **`manifest.json` points at this repository.** `documentation`, `issue_tracker` and `codeowners` all named the original author. Home Assistant renders these directly in the integration page, so an installed copy was sending users to a repository that will never ship a fix. They are now `kou147258/HA-Optimizer` / `@kou147258`.
+- 🔗 **The README's HACS install button pointed upstream.** Following it installed the abandoned version. It now points at this repository, and a notice at the top of the README says which line is maintained and why.
+- 🙏 **Credits kept, donate link re-scoped.** The original author keeps full credit for the design and the original code, and their PayPal is still reachable — but the "buy me a coffee" button is gone, because that money goes to them and the fork's maintainer is someone else. The support section now asks for issue reports instead.
+
+---
+
 ## [1.5.0] - 2026-10-02
 
 Interface languages trimmed to **English + 简体中文**. This is a deliberate
 narrowing of 1.4.0, not an accident: the eleven other dictionaries are gone
 from `panel.html`, the `LANGUAGES` table and the HA-language map, which takes
 the shipped panel from 510 KB to 252 KB. Vietnamese went with them, so this
-fork no longer speaks the upstream author's first language — see the note at
-the bottom before opening a PR against `doanlong1412/HA-Optimizer`.
+fork no longer speaks the upstream author's first language.
 
 ### Added
 - 🇨🇳 **The theme names are translated.** The eleven theme entries (Deep Space, Midnight Purple, …) had a hardcoded English `name` next to a translated `descKey`, so a Chinese user saw "深色 + 蓝" described underneath a button reading "Deep Space". Each theme now carries a `nameKey` and both the menu items and the current-theme button resolve through `t()`.

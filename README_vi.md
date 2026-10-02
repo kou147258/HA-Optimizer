@@ -1,7 +1,7 @@
 # 🧹 HA Optimizer
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-1.5.0-blue)
+![version](https://img.shields.io/badge/version-1.5.1-blue)
 ![HA](https://img.shields.io/badge/Home%20Assistant-2023.1+-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.11+-yellow)
@@ -142,7 +142,7 @@ Toàn bộ panel — mọi nhãn, nút, thông báo và lỗi — đều đượ
 
 ### Cách 1: HACS (Khuyến nghị)
 
-[![Open HACS Repository](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=doanlong1412&repository=HA-Optimizer&category=integration)
+[![Open HACS Repository](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=kou147258&repository=HA-Optimizer&category=integration)
 
 > Nếu nút không hoạt động, thêm thủ công:
 1. Mở HACS → **Integrations** → nhấn menu **⋮** → **Custom repositories**
@@ -405,14 +405,17 @@ Nếu bạn thấy hữu ích, hãy ⭐ **star repo** nhé — giúp ích rất 
 
 ## 🙏 Credits
 
-Thiết kế và phát triển bởi **[@doanlong1412](https://github.com/doanlong1412)** từ 🇻🇳 Việt Nam.
+Thiết kế và phát triển bởi **[@doanlong1412](https://github.com/doanlong1412)** từ 🇻🇳 Việt Nam — bản fork này xây dựng trên nền tảng đó.
+
+**Được duy trì bởi [@kou147258](https://github.com/kou147258)**, tiếp quản từ tháng 10/2026 sau khi tác giả gốc ngừng cập nhật.
 
 ---
 
 ## ☕ Ủng Hộ
 
-Nếu HA Optimizer giúp ích cho bạn, hãy ủng hộ mình một ly cà phê nhé!
+Cách hữu ích nhất bạn có thể làm là **báo lỗi khi có thứ gì hỏng** — vấn đề trong kho này được đọc và xử lý:
 
-[![PayPal](https://img.shields.io/badge/Ủng%20hộ-PayPal-00457C?style=for-the-badge&logo=paypal&logoColor=white)](https://www.paypal.com/paypalme/doanlong1412)
+👉 [Mở issue](https://github.com/kou147258/HA-Optimizer/issues)
 
-Mọi sự ủng hộ đều được trân trọng và là động lực để mình tiếp tục phát triển. Cảm ơn bạn rất nhiều! 🙏
+Nếu bạn vẫn muốn ủng hộ trực tiếp tác giả gốc, liên kết
+[PayPal](https://www.paypal.com/paypalme/doanlong1412) của họ vẫn còn ở dự án gốc.

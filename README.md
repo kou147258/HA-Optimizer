@@ -1,14 +1,22 @@
 # 🧹 HA Optimizer
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-1.5.0-blue)
+![version](https://img.shields.io/badge/version-1.5.1-blue)
 ![HA](https://img.shields.io/badge/Home%20Assistant-2023.1+-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.11+-yellow)
-![languages](https://img.shields.io/badge/UI-13%20languages-blueviolet)
+![languages](https://img.shields.io/badge/UI-English%20%2B%20%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-blueviolet)
 ![themes](https://img.shields.io/badge/themes-11%20built--in-ff69b4)
 
 > 🇻🇳 **Phiên bản tiếng Việt:** [README_vi.md](README_vi.md)
+
+> ℹ️ **This is the actively maintained line of HA Optimizer.** The original
+> project by [@doanlong1412](https://github.com/doanlong1412) has been
+> unmaintained since April 2026; this fork carries it forward and is where
+> fixes and releases land. **Install from `kou147258/HA-Optimizer`**, not from
+> the original repository — that one will not receive HA 2026.8 support, the
+> Chinese translation, or the delete-path safety fixes. Original author's
+> work and MIT licence are preserved and credited below.
 
 **The smart cleanup, analysis and health-check integration for Home Assistant.**
 
@@ -148,7 +156,7 @@ With nothing stored, the panel follows Home Assistant's own language: `zh-Hans` 
 ### Method 1: HACS (Recommended)
 **Step 1** — Add this repository to HACS:
 
-[![Open HACS Repository](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=doanlong1412&repository=HA-Optimizer&category=integration)
+[![Open HACS Repository](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=kou147258&repository=HA-Optimizer&category=integration)
 
 > If the button doesn't work, add manually:
 1. Open HACS → **Integrations** → click the **⋮** menu → **Custom repositories**
@@ -410,14 +418,19 @@ If you find this useful, please ⭐ **star the repo** — it helps a lot!
 
 ## 🙏 Credits
 
-Designed and developed by **[@doanlong1412](https://github.com/doanlong1412)** from 🇻🇳 Vietnam.
+Designed and developed by **[@doanlong1412](https://github.com/doanlong1412)** from 🇻🇳 Vietnam — this fork stands on that work.
+
+**Maintained by [@kou147258](https://github.com/kou147258)**, which took over in October 2026 after the original went unmaintained: Simplified Chinese translation, English + Chinese only, HA 2026.8+ frontend compatibility, three delete-path data-loss fixes, and a guard suite in CI.
 
 ---
 
 ## ☕ Support
 
-If HA Optimizer saves you time and keeps your Home Assistant clean, consider buying me a coffee!
+If HA Optimizer saves you time, the most useful thing you can do is **report
+what breaks** — issues in this repository are read and acted on:
 
-[![PayPal](https://img.shields.io/badge/Donate-PayPal-00457C?style=for-the-badge&logo=paypal&logoColor=white)](https://www.paypal.com/paypalme/doanlong1412)
+👉 [Open an issue](https://github.com/kou147258/HA-Optimizer/issues)
 
-Every contribution is greatly appreciated and motivates further development. Thank you! 🙏
+If you would rather support the original author directly, their
+[PayPal](https://www.paypal.com/paypalme/doanlong1412) is still linked in the
+original project.
