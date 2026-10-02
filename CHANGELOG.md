@@ -17,6 +17,30 @@ store** rather than the working copy (the worktree is CRLF under
 that differs byte-for-byte from the one on GitHub). Verified by expanding the
 downloaded release: 12 files, every one byte-identical to its object.
 
+## [1.7.3] - 2026-10-03
+
+**恢复一个自动化，结果它真的没了。** 复现于实机，装的是 1.7.2。**没有东西被删除过。**
+
+### Fixed
+- 👻 **`restore` 报告成功，而实体根本没有回来。** `async_update_entity(entity_id, disabled_by=None)` 只改了实体注册表里的一行字典，它**不会重新实例化任何东西**——Home Assistant 只在「拥有该实体的配置条目被重新 setup」时才会重建实体。于是引擎改完字典就返回 `re_enabled: true`，`handle_restore` 看到 `success` 便删掉了回收站记录。实体一直消失，直到别的东西把它重新装载。
+  实机上的经过：`purge` → 实体离开状态机；`restore` → `{"success": true, "re_enabled": true}`，**实体没回来**；`scan` → 根本找不到它。随后手动执行一次 `automation.reload`，`automation.3333` 连同另外四个**已经卡住好几天的自动化**一起回来了（`xin_jian_zi_dong_hua`、`_2`、`_3`、`22222`）——它们全都不是被删了。
+  现在恢复会重载拥有该实体的配置条目，这正是 HA 自己的实体注册表界面在重新启用时做的事，并返回 `reloaded` 说明实际发生了什么。
+- 🔁 **「已经是启用状态」那条分支现在也会重载。** 那恰恰是上一次恢复留下的卡死状态；在这里回一句「无需处理」，正是实体被卡住却再也没人管的原因。
+- 🧾 **回收站记录不再被一句假成功删掉。** `_verified_restore` 现在会在丢记录之前**去状态机核实**，并带一个有界等待（避免在负载高的实例上因延迟误判）。假成功会把一次失败的恢复变成真正的删除；现在它会把记录留下。
+
+### Fixed — the row that comes back
+- ☑️ **恢复回来的那一行会重新读实体注册表**，而不是原样回放删除前的快照。快照里的 `disabled` 是扫描当时的值——而一个自动化之所以出现在候选列表里，正是因为它被标记为「已禁用」，所以**错答案是必然而非偶发**：快照说已禁用，恢复把它改成启用，回放快照又把「已禁用」断言一遍。1.7.2 里「已禁用」这个理由不再成立时会被移除，理由清空的行不再标 medium；实体不在注册表里则保持快照原样，不编造状态。
+- 💬 **「无需重新启用」不再弹「→ 清空回收站」**，那句话读起来就是「被删了」。现在说的是：已移出回收站，它本来就是启用状态，重新扫描一次即可刷新列表。
+- 🔄 **恢复后立即重拉扫描列表。** 表格渲染自扫描时的内存列表，此前恢复的行要等到下次扫描（最长 `scan_interval_days`）才可能出现。
+- 📋 面板同步的警告现在说明**替换已成功**并提示刷新页面。它每次升级都会出现，而一条只报告问题的消息会训练人忽略这个横幅。级别仍保持 WARNING：旧副本意味着「屏幕上的界面 ≠ 已安装的代码」。
+
+### Verified
+在实机上复现并修复：先在装着的 1.7.2 上跑通完整循环并抓到证据，再改代码。新增
+`tools/test_restore_engine.py`（17 项行为测试，真实引擎 + 桩 HA）、
+`tools/test_restore_truth.py`（16 项）、`tools/counterproof_restore.py`（5 条反证），
+连同上一版的界面套件一并接入 CI。其中两项行为测试第一轮是红的——**是我的桩没有模仿
+HA「`disabled` 由 `disabled_by` 派生」这条语义**，桩错了，不是引擎错了。
+
 ## [1.7.2] - 2026-10-03
 
 **The delete button was never reporting anything, and it looked like the delete
