@@ -235,11 +235,42 @@ registrations = source.count("supports_response=SupportsResponse.OPTIONAL")
 panel_src = (COMPONENT / "panel.html").read_text(encoding="utf-8")
 m = re.search(r"SERVICES_WITH_RESPONSE\s*=\s*new Set\(\[([^\]]*)\]\)", panel_src)
 with_response = set(re.findall(r"'([a-z_]+)'", m.group(1))) if m else set()
+check("the panel asks for responses", bool(with_response))
 check("every service the panel asks a response from is registered OPTIONAL",
       with_response and registrations >= len(with_response),
       f"{registrations} OPTIONAL registrations vs {len(with_response)} in the panel")
-check("no service is registered without declaring a response mode",
-      "async_register(" in source and "supports_response" in source)
+
+# Count alone would not have caught the real defect: `purge` and `restore` were
+# registered with NO supports_response, so Home Assistant treated them as NONE
+# and threw the return value away. The panel then read an empty object and
+# skipped every outcome toast - pressing "delete permanently" closed the
+# dialog and said nothing at all, which reads as "the delete did not work".
+# Matching by identity is the only thing that catches that.
+# Match each registration BLOCK rather than scanning the whole file, and take
+# the most capable mode per service rather than the last seen. Both matter:
+# a regex over the source consumes text, so the `except ImportError` fallback
+# that re-declares a service without a response flag would overwrite the real
+# answer, and several services are registered twice that way.
+by_const: dict[str, str] = {}
+for block in source.split("async_register(")[1:]:
+    name = re.search(r"(SERVICE_[A-Z_]+)\s*,\s*handle_\w+", block)
+    if not name:
+        continue
+    key = name.group(1).replace("SERVICE_", "").lower()
+    mode = re.search(r"supports_response=SupportsResponse\.(\w+)", block)
+    found = mode.group(1).lower() if mode else "none"
+    if by_const.get(key) in (None, "none"):
+        by_const[key] = found
+missing = sorted(s for s in with_response if by_const.get(s) != "optional")
+check("every service the panel asks a response from declares OPTIONAL by name",
+      not missing, f"not OPTIONAL: {missing} (parsed: {by_const})")
+check("purge declares a response mode", by_const.get("purge") == "optional",
+      "with NONE the result dict is discarded and the panel goes silent")
+check("restore declares a response mode", by_const.get("restore") == "optional",
+      "restore reported the same outcome whether it worked or not")
+check("no service the panel uses is left on the implicit default",
+      not [s for s in with_response if by_const.get(s) == "none"],
+      f"implicit NONE: {[s for s in with_response if by_const.get(s) == 'none']}")
 
 # The reason ONLY was wrong has to stay written down, or somebody will
 # "tighten" it back.
@@ -247,15 +278,21 @@ check("the ONLY/OPTIONAL decision is explained in a comment",
       "ONLY means" in source and "return_response" in source)
 
 
-# ═══ 3. the panel still asks for responses, so OPTIONAL changes nothing ═════
+# ═══ 3. the panel asks for exactly the services that can answer ═════════════
 print("\npanel consistency")
 panel = (COMPONENT / "panel.html").read_text(encoding="utf-8")
 m = re.search(r"SERVICES_WITH_RESPONSE\s*=\s*new Set\(\[([^\]]*)\]\)", panel)
 with_response = set(re.findall(r"'([a-z_]+)'", m.group(1))) if m else set()
-check("the panel still requests responses for all 10 read-only services",
-      len(with_response) == 10, f"found {sorted(with_response)}")
+# The set grows as services gain a response mode, so it is described by
+# membership, never by a count. `len(...) == 10` went stale twice today.
+check("the panel asks for responses at all", bool(with_response))
 check("no read-only service was dropped from the panel's response set",
       {"scan", "get_results", "analyze_health", "analyze_addons"} <= with_response)
+check("the delete path is in the panel's response set",
+      {"purge", "restore"} <= with_response,
+      "without these the panel reads an empty result and shows nothing")
+check("the bulk trash services are in the panel's response set",
+      {"restore_all", "empty_trash"} <= with_response)
 
 
 # ═══ 4. filter <option> labels must be matched by value, not by index ══════

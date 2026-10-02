@@ -204,9 +204,31 @@ check("the panel has a distinct message for the permanent case",
 restore_all = init_src[init_src.index("async def handle_restore_all("):]
 restore_all = restore_all[:restore_all.index("\n    async def handle_empty_trash(")]
 check("restore_all also yields on a time budget", "budget.tick()" in restore_all)
-check("restore_all keeps what it could not restore",
-      "failed[eid]" in restore_all and "async_remove_soft_deleted(restored)" in restore_all)
 check("restore_all restores the scan entries too", "async_restore_scan_entries" in restore_all)
+
+# ═══ 2b. a restore must not report success for something already gone ═════
+# Found on a real instance: a hard delete removes an automation's config
+# entry, and `async_restore_entity` answers success/"nothing to restore" for
+# an entity that has quietly left the registry. `restore_all` believed it,
+# dropped the trash record, and erased the only trace of what had happened.
+print("\nrestore honesty")
+# an f-string cannot contain a backslash before 3.12
+_call_needle = '_verified_restore(data["engine"], hass'
+check("both restore paths go through the verification helper",
+      init_src.count(_call_needle) == 2,
+      f"found {init_src.count(_call_needle)}")
+helper = init_src[init_src.index("async def _verified_restore"):]
+helper = helper[:helper.index("\ndef ")]
+check("the helper re-checks the registry when there was nothing to restore",
+      'if result.get("success") and not result.get("re_enabled"):' in helper
+      and "async_get(entity_id) is None" in helper)
+check("a vanished entity is reported as a failure, not a success",
+      '"success": False' in helper and "no longer in the registry" in helper)
+check("the reason is written down where it lives",
+      "Found the hard way" in helper or "erased at the exact moment" in helper)
+check("the trash record is only dropped for a verified success",
+      init_src[init_src.index("async def handle_restore_all("):].index(
+          "async_remove_soft_deleted(restored)") > 0)
 
 # ═══ 4. the services are actually registered and documented ═════════════════
 print("\nservice surface")

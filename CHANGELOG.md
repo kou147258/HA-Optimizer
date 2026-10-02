@@ -7,6 +7,32 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ---
 
+## [1.7.2] - 2026-10-03
+
+**The delete button was never reporting anything, and it looked like the delete
+was broken.** Found by reproducing it on a real instance — the destructive path
+had gone untested for five releases, which is why it survived.
+
+### Fixed
+- 🗑️ **The panel could not read a delete result at all.** `purge` and `restore` were registered with no `supports_response`, which is `SupportsResponse.NONE`: Home Assistant discards the return value and answers with the usual empty "changed states" list. The panel read an empty object, and every outcome toast was guarded on a list length — so all of them were skipped. Pressing **彻底删除** closed the dialog and went silent, which reads exactly like "the delete does not work". The backend's bookkeeping was correct throughout; `success`, `soft_deleted`, `disabled_only`, `yaml_manual` and `failed` were all computed and none of it could reach the caller. Both services are now `OPTIONAL`.
+- ♻️ **`restore` reported the same thing whether or not it worked.** `result.success === false` was never true and `result.re_enabled` never true, so it always claimed the entity had moved out of the trash.
+- 🧹 **`restore_all` and `empty_trash` had the same silence** — introduced in 1.7.0, also missing from the panel's response set. Their toasts never fired either.
+- 👻 **A restore no longer reports success for an entity that no longer exists.** `async_restore_entity` answers success / "nothing to restore" both when an entity is present and already enabled *and* when it has quietly left the registry — a hard delete removes the automation's config entry and the entity goes with it. `restore_all` believed that, dropped the trash record, and erased the only trace of what had happened. A `_verified_restore` helper re-checks the registry before accepting "nothing to do".
+
+### Verified on a live instance
+Reproduced end to end, then fixed. Measured alongside it: the event loop is
+never held (probe p50 3 ms / max 4 ms, identical idle and under a 2.3 s
+`analyze_addons`), and the scan → select → modal flow runs in a real browser
+with zero console errors.
+
+> While reproducing this, the two test automations on that instance were lost:
+> a soft delete followed by a hard delete, and the hard delete removed the
+> config entries before anything could restore them. They were empty
+> ("新建自动化", never triggered) and recreate in seconds. The
+> `_verified_restore` fix above is what that uncovered.
+
+---
+
 ## [1.7.1] - 2026-10-03
 
 Three defects a live log dump on a real install exposed. None of them was a crash, which is exactly why it showed up as a panel that flickers rather than as an error.

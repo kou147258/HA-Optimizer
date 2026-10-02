@@ -66,6 +66,36 @@ _LAST_WARNED: dict[str, float] = {}
 _WARN_THROTTLE_SECONDS = 300.0
 
 
+async def _verified_restore(engine, hass: HomeAssistant, entity_id: str) -> dict:
+    """Restore an entity and make sure the answer means something.
+
+    `async_restore_entity` answers `success, re_enabled=False` for "there was
+    nothing to restore", which is true both when the entity is present and
+    already enabled AND when it has quietly disappeared from the registry - a
+    hard delete removes the automation's config entry, and the entity can be
+    gone by the time anyone tries to restore it. Trusting that answer made
+    `restore_all` drop the trash record for an entity that no longer existed,
+    so the one trace of what had happened was erased at the exact moment it
+    mattered. Found the hard way, on a real instance, after losing two test
+    automations to the very delete path this project is about.
+
+    So: if the engine says there was nothing to do, check that the entity is
+    actually still there before calling that a success.
+    """
+    result = await engine.async_restore_entity(entity_id)
+    if result.get("success") and not result.get("re_enabled"):
+        from homeassistant.helpers import entity_registry as er
+        if er.async_get(hass).async_get(entity_id) is None:
+            return {
+                "success": False,
+                "re_enabled": False,
+                "entity_id": entity_id,
+                "error": "no longer in the registry - it was deleted, not disabled",
+            }
+    result.setdefault("entity_id", entity_id)
+    return result
+
+
 def _missing_endpoint(path: str) -> None:
     """Announce an endpoint this Supervisor does not have, exactly once."""
     if path in _WARNED_ONCE:
@@ -364,7 +394,7 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
         """Handle restore service call."""
         entity_id = call.data.get("entity_id")
         data = hass.data[DOMAIN][entry.entry_id]
-        result = await data["engine"].async_restore_entity(entity_id)
+        result = await _verified_restore(data["engine"], hass, entity_id)
         if result.get("success"):
             # Put the entity back in the scan list BEFORE dropping the trash
             # record - the snapshot it needs lives in that record. Without
@@ -393,7 +423,7 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
         budget = _Cooperative()
 
         for eid in list(trash):
-            result = await data["engine"].async_restore_entity(eid)
+            result = await _verified_restore(data["engine"], hass, eid)
             if result.get("success"):
                 restored.append(eid)
             else:
@@ -867,18 +897,28 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
             DOMAIN, SERVICE_SCAN, handle_scan,
             schema=vol.Schema({}),
         )
+    # purge and restore return a result the panel genuinely needs: which
+    # entities really went, which were only disabled, which are YAML-defined
+    # and must be done by hand. Registered with no supports_response they were
+    # SupportsResponse.NONE, so Home Assistant discarded the return value and
+    # answered with the usual empty "changed states" list. The panel then read
+    # an empty object and skipped every outcome toast: pressing "delete
+    # permanently" closed the dialog and went silent, which reads as "the
+    # delete did not work". OPTIONAL is what makes the result reachable.
     hass.services.async_register(
         DOMAIN, SERVICE_PURGE, handle_purge,
         schema=vol.Schema({
             vol.Required("entity_ids"): [cv.entity_id],
             vol.Optional("soft_delete"): bool,
         }),
+        supports_response=SupportsResponse.OPTIONAL,
     )
     hass.services.async_register(
         DOMAIN, SERVICE_RESTORE, handle_restore,
         schema=vol.Schema({
             vol.Required("entity_id"): cv.entity_id,
         }),
+        supports_response=SupportsResponse.OPTIONAL,
     )
     # Bulk trash operations. restore_all is the undo button for a purge that
     # went wrong; empty_trash is irreversible and the panel gates it behind a
