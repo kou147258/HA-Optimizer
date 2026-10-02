@@ -7,6 +7,24 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ---
 
+## [1.5.2] - 2026-10-02
+
+Two defects found by auditing the running integration against a live Home
+Assistant 2026.8.3 instance. Both were pre-existing, neither was caused by the
+version, and both fail quietly rather than loudly.
+
+### Fixed
+- 🧹 **An upgrade could leave the old panel being served, silently.** `_copy_panel_to_www()` decided whether the panel needed copying by comparing mtimes and skipped whenever the served copy was not older than the source. Nothing in a HACS install sets mtime to anything meaningful, and the copy itself used `shutil.copy2`, which preserves the source mtime — so the check could only be right by accident, and when it guessed wrong the new panel was installed and the old one kept being served with nothing in the log. This is the function behind the "the panel 404s and nobody knows why" report earlier. It now compares **content**, writes beside the target and renames over it (a half-written file is a 404 in the iframe), and logs a **warning** with both byte counts when it replaces a file that did not match.
+- 🔌 **Seven services were callable from the panel and nowhere else.** `analyze_recorder`, `analyze_dashboard`, `analyze_storms`, `analyze_dead_code`, `analyze_health`, `analyze_addons` and `analyze_fingerprint` were registered with `SupportsResponse.ONLY`, which Home Assistant enforces: the caller *must* ask for a response. Only the panel does — it adds `?return_response` on all three of its call paths. Automations, scripts, blueprints and the Developer Tools action picker have no way to ask, so all seven answered HTTP 400. `scan`, `get_results` and `collect_baseline` were already `OPTIONAL`, so this was an inconsistency rather than a deliberate design. They are now `OPTIONAL` too: identical for the panel, and "run a weekly health check from an automation" finally works.
+
+### Added
+- 🔧 **`tools/test_panel_sync.py`** — 14 checks, no Home Assistant required. It covers the copy decision on the exact case that shipped broken (identical bytes, destination stamped *later*), on a stale-and-newer panel, on a stale-and-older one, that unrelated files in the target directory are never deleted, that no scratch file is left behind, and that no service is registered `ONLY`. All four defects are confirmed to turn it red when re-injected. Wired into the existing `i18n` CI job, which gates releases.
+
+### Not changed
+- `purge` and `restore` are deliberately not part of this release's live testing. They were exercised only as far as their schema gate (`purge` with no `entity_ids` → HTTP 400, handler never runs; `purge` with an empty list → 200 and nothing deleted). The destructive path is still covered only by the 17 checks in `tools/test_purge_safety.py`.
+
+---
+
 ## [1.5.1] - 2026-10-02
 
 The fork takes over as the maintained line. The original project has been

@@ -1,7 +1,7 @@
 # 🧹 HA Optimizer
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-1.5.1-blue)
+![version](https://img.shields.io/badge/version-1.5.2-blue)
 ![HA](https://img.shields.io/badge/Home%20Assistant-2023.1+-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.11+-yellow)
@@ -364,6 +364,8 @@ automation:
 | `ha_optimizer.analyze_addons` | Add-on list + live CPU/RAM + host resource data |
 | `ha_optimizer.collect_baseline` | Manual baseline snapshot collection |
 
+> **All twelve can be called from an automation, a script or Developer Tools → Actions.** The ten read-only ones additionally return their result as a service response, so `response_variable:` gives you the data inline — but they persist their results either way, so you can also fire one on a schedule and read the outcome later from the panel.
+
 ---
 
 ## 🛡️ Safety
@@ -385,7 +387,7 @@ automation:
 | Dependencies | None — uses only HA built-ins |
 | Python | 3.11+ |
 
-> **Why 2023.7+?** The panel uses `return_response` on service calls (introduced in HA 2023.7). All other features work on 2023.1+.
+> **Why 2023.7+?** The panel asks for a service response when it calls an analysis service (`return_response`, introduced in HA 2023.7). Every service still works on 2023.1+ — the panel just falls back to reading the stored results.
 
 ---
 

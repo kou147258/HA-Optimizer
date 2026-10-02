@@ -29,6 +29,9 @@ jobs:
       - name: Purge safety regression tests
         run: python3 tools/test_purge_safety.py
 
+      - name: Panel sync and service registration regression tests
+        run: python3 tools/test_panel_sync.py
+
   # ── HACS Validation ──────────────────────────────────────────────────────────
   hacs-validate:
     name: HACS Validation

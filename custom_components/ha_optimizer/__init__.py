@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -61,7 +60,20 @@ def _copy_panel_to_www(hass: HomeAssistant) -> bool:
     Copy panel.html from custom_components/ha_optimizer/
     to config/www/ha_optimizer/ so HA can serve it via /local/.
 
-    Returns True if copy succeeded (or file was already up to date).
+    The decision is made on CONTENT, never on mtime. The previous version
+    compared timestamps and skipped whenever the served copy was not older than
+    the source, which meant a genuine upgrade could install a new panel and
+    leave the old one being served - silently, with nothing in the log. Nothing
+    in a HACS install sets mtime to anything meaningful, and the copy itself
+    used shutil.copy2, which preserves the source mtime, so the check could
+    only ever be right by accident. It has already cost this project one
+    "the panel 404s and nothing says why" afternoon.
+
+    Unexpected files in the target directory are reported, never deleted: that
+    directory belongs to the user as far as we know, and this function's job
+    is to make the served panel match, not to tidy up.
+
+    Returns True if the served panel now matches the shipped one.
     """
     src = Path(__file__).parent / "panel.html"
     www_dir = Path(hass.config.config_dir) / "www" / "ha_optimizer"
@@ -74,16 +86,32 @@ def _copy_panel_to_www(hass: HomeAssistant) -> bool:
     try:
         www_dir.mkdir(parents=True, exist_ok=True)
 
-        # Only copy if source is newer or destination doesn't exist
-        if dst.exists():
-            src_mtime = src.stat().st_mtime
-            dst_mtime = dst.stat().st_mtime
-            if src_mtime <= dst_mtime:
-                _LOGGER.debug("panel.html is already up to date, skipping copy.")
-                return True
+        source = src.read_bytes()
+        served = dst.read_bytes() if dst.exists() else None
 
-        shutil.copy2(src, dst)
-        _LOGGER.info("Copied panel.html → %s", dst)
+        if served == source:
+            for stray in sorted(www_dir.iterdir()):
+                if stray.name != dst.name and stray.is_file():
+                    _LOGGER.debug(
+                        "Unexpected file in www/ha_optimizer (left alone): %s", stray.name
+                    )
+            return True
+
+        # Write beside the target and rename over it. A half-written panel.html
+        # is a 404 inside the iframe, and copy-then-truncate is exactly that.
+        tmp = dst.parent / (dst.name + ".new")
+        tmp.write_bytes(source)
+        tmp.replace(dst)
+
+        if served is None:
+            _LOGGER.info("Installed panel.html → %s", dst)
+        else:
+            _LOGGER.warning(
+                "Replaced a stale panel.html under www/ (%d → %d bytes): the "
+                "served copy did not match the installed integration",
+                len(served),
+                len(source),
+            )
         return True
 
     except OSError as err:
@@ -572,6 +600,16 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
             "baseline_days": fp_store.count_days(),
         }
 
+    # Every read-only service is registered OPTIONAL, never ONLY. ONLY means
+    # "the caller must ask for a response", and only the panel ever asks - it
+    # adds ?return_response on all three of its call paths. Automations,
+    # scripts, blueprints and the Developer Tools action picker have no way to
+    # ask, so under ONLY the seven analyze_* services were callable from the
+    # panel and from nowhere else. OPTIONAL changes nothing for the panel and
+    # makes "run a weekly health check from an automation" possible. The
+    # results are persisted by the handler either way; the return value is a
+    # convenience, not the delivery mechanism.
+    #
     # supports_response is available since HA 2023.7 — import conditionally
     try:
         from homeassistant.core import SupportsResponse
@@ -608,37 +646,37 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
         hass.services.async_register(
             DOMAIN, SERVICE_ANALYZE_RECORDER, handle_analyze_recorder,
             schema=vol.Schema({}),
-            supports_response=SupportsResponse.ONLY,
+            supports_response=SupportsResponse.OPTIONAL,
         )
         hass.services.async_register(
             DOMAIN, SERVICE_ANALYZE_DASHBOARD, handle_analyze_dashboard,
             schema=vol.Schema({}),
-            supports_response=SupportsResponse.ONLY,
+            supports_response=SupportsResponse.OPTIONAL,
         )
         hass.services.async_register(
             DOMAIN, SERVICE_ANALYZE_STORMS, handle_analyze_storms,
             schema=vol.Schema({}),
-            supports_response=SupportsResponse.ONLY,
+            supports_response=SupportsResponse.OPTIONAL,
         )
         hass.services.async_register(
             DOMAIN, SERVICE_ANALYZE_DEAD_CODE, handle_analyze_dead_code,
             schema=vol.Schema({}),
-            supports_response=SupportsResponse.ONLY,
+            supports_response=SupportsResponse.OPTIONAL,
         )
         hass.services.async_register(
             DOMAIN, SERVICE_ANALYZE_HEALTH, handle_analyze_health,
             schema=vol.Schema({}),
-            supports_response=SupportsResponse.ONLY,
+            supports_response=SupportsResponse.OPTIONAL,
         )
         hass.services.async_register(
             DOMAIN, SERVICE_ANALYZE_ADDONS, handle_analyze_addons,
             schema=vol.Schema({}),
-            supports_response=SupportsResponse.ONLY,
+            supports_response=SupportsResponse.OPTIONAL,
         )
         hass.services.async_register(
             DOMAIN, SERVICE_ANALYZE_FINGERPRINT, handle_analyze_fingerprint,
             schema=vol.Schema({}),
-            supports_response=SupportsResponse.ONLY,
+            supports_response=SupportsResponse.OPTIONAL,
         )
         hass.services.async_register(
             DOMAIN, SERVICE_COLLECT_BASELINE, handle_collect_baseline,
