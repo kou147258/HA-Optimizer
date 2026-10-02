@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -86,16 +87,41 @@ class PurgeStore:
 
         Must be called BEFORE `async_remove_soft_deleted`, which is what
         discards the snapshots.
+
+        The snapshot is the analysis, not the state. Replaying it verbatim put
+        the entity back in the list still marked `disabled: true` - and for the
+        main use of this feature that is guaranteed: the reason a disabled
+        automation shows up as a candidate at all is `reason_auto_disabled`,
+        so the snapshot says disabled, the restore un-disables it, and the row
+        comes back claiming it is still disabled. A restore that worked then
+        looks exactly like one that did not, which is what a live instance
+        reported. The current state is therefore re-read from the registry
+        before the row is written back.
         """
         results = self._scan_data.setdefault("results", [])
         present = {r.get("entity_id") for r in results if isinstance(r, dict)}
         added: list[str] = []
+        ent_reg = er.async_get(self.hass) if self.hass is not None else None
         for eid in entity_ids:
             meta = self._soft_data.get(eid) or {}
             snapshot = meta.get("scan_entry")
             if not isinstance(snapshot, dict) or eid in present:
                 continue
-            results.append(snapshot)
+            entry = dict(snapshot)
+            current = ent_reg.async_get(eid) if ent_reg is not None else None
+            if current is not None:
+                entry["disabled"] = bool(current.disabled)
+                if not current.disabled:
+                    # The reason no longer holds. Leaving it would keep the row
+                    # flagged as a problem on the strength of something that
+                    # was fixed a moment ago.
+                    reasons = entry.get("reason")
+                    if isinstance(reasons, list) and "reason_auto_disabled" in reasons:
+                        reasons = [r for r in reasons if r != "reason_auto_disabled"]
+                        entry["reason"] = reasons
+                        if not reasons:
+                            entry["risk_level"] = "low"
+            results.append(entry)
             present.add(eid)
             added.append(eid)
         if added:

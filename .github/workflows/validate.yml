@@ -46,6 +46,12 @@ jobs:
       - name: UI label checks can still fail
         run: node tools/counterproof_ui_labels.js
 
+      - name: Restore-truth regression tests
+        run: python3 tools/test_restore_truth.py
+
+      - name: Restore-truth checks can still fail
+        run: python3 tools/counterproof_restore.py
+
       - name: Compatibility claim checks
         run: python3 tools/test_compat_claims.py
 

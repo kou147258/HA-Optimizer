@@ -2569,7 +2569,11 @@ async function restoreEntity(id, btn) {
     if (result.re_enabled) {
       toast('success', `${t('softRestoreBtn')}: ${id}`);
     } else {
-      toast('info', `ℹ️ ${id} → ${t('emptyTrash')}`);
+      // Not "→ empty trash". The entity is out of the trash either way; the
+      // only question left is whether it needed re-enabling, and the old
+      // wording read as "this got deleted", which is the opposite of what
+      // happened.
+      toast('info', `\u2139\ufe0f ${id}: ${t('restoreAlreadyEnabled')}`);
     }
 
     // Remove from trash UI
@@ -2583,7 +2587,21 @@ async function restoreEntity(id, btn) {
     const sd = document.getElementById('statSoftDel');
     if (sd) sd.textContent = Math.max(0, (parseInt(sd.textContent) || 1) - 1);
 
-    // DO NOT remove from scan results — entity is back, next scan will correctly show/hide it
+    // Pull the scan list back from the server. The backend put the entity
+    // back into the stored results, but this table is rendered from the
+    // in-memory list captured at scan time, so without this the row stays
+    // gone until the next scan - which is up to scan_interval_days away and
+    // reads exactly like "I restored it and it disappeared again".
+    try {
+      const fresh = extractData(await callService('ha_optimizer', 'get_results', {}));
+      if (fresh && Array.isArray(fresh.results)) {
+        displayResults(fresh.results);
+        updateStats(fresh.statistics || {});
+        localStorage.setItem('ha_optimizer_results', JSON.stringify(fresh));
+      }
+    } catch (e) {
+      console.warn('[PurgeEngine] refresh after restore failed:', e);
+    }
 
   } catch(e) {
     toast('error', `❌ ${e.message}`);
@@ -3991,6 +4009,7 @@ const I18N = {
     fingerprintNoDataTitle: 'No Fingerprint Data Yet',
     fingerprintEmptyBody: '<strong>Fingerprint</strong> tracks the "normal behaviour" of HA day by day.<br>Step 1: Click <strong>📥 Collect Baseline</strong> to save yesterday\'s data.<br>Step 2: Repeat daily (or automate at 00:05) to build your baseline.<br>Step 3: After 3–7 days, click <strong>🫆 Analyze Fingerprint</strong> to detect anomalies.',
     softRestoreBtn: '♻️ Restore',
+      restoreAlreadyEnabled: 'Out of the trash; it was already enabled, so nothing needed re-enabling. Run a scan to refresh this list.',
     softHardDelBtn: '❌ Hard Delete',
     impactNote: '⚡ Impact Analysis:',
     gaugeGood: 'Good', gaugeAvg: 'Average', gaugePoor: 'Needs Attention',
@@ -4443,6 +4462,7 @@ const I18N = {
     fingerprintNoDataTitle: '暂无指纹数据',
     fingerprintEmptyBody: '<strong>指纹</strong>会逐日记录 HA 的"正常行为"。<br>第 1 步:点击 <strong>📥 采集基线</strong>保存昨天的数据。<br>第 2 步:每天重复一次(或用 00:05 的自动化)来积累基线。<br>第 3 步:3–7 天之后,点击 <strong>🫆 分析指纹</strong>来发现异常。',
     softRestoreBtn: '♻️ 恢复',
+      restoreAlreadyEnabled: '已从回收站移除；它本来就是启用状态，无需重新启用。重新扫描一次以刷新列表。',
     softHardDelBtn: '❌ 彻底删除',
     impactNote: '⚡ 影响分析:',
     gaugeGood: '良好',

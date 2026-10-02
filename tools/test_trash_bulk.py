@@ -64,6 +64,31 @@ def _stub() -> None:
             self.data = data
             self.saves += 1
 
+    # store.py re-reads the entity registry when it puts a restored row back,
+    # so that the row reports the current state instead of the snapshot taken
+    # before the delete. The stub has to answer, or the restore tests here would
+    # be measuring a different function than the one that ships.
+    entity_registry = types.ModuleType("homeassistant.helpers.entity_registry")
+
+    class _RegistryEntry:
+        def __init__(self, disabled=False):
+            self.disabled = disabled
+
+    class _EntReg:
+        def __init__(self, entities=None):
+            self._entities = entities or {}
+
+        def async_get(self, entity_id):
+            return self._entities.get(entity_id)
+
+    # Tests set this to control what the registry claims.
+    entity_registry._current = _EntReg()
+    entity_registry.async_get = lambda hass: entity_registry._current
+    # Exposed so the behavioural checks below can describe registry entries
+    # without reaching into this function's locals.
+    entity_registry._RegistryEntry = _RegistryEntry
+    entity_registry._EntReg = _EntReg
+
     storage.Store = _Store
     util = types.ModuleType("homeassistant.util")
     util.__path__ = []
@@ -81,11 +106,13 @@ def _stub() -> None:
     for name, mod in [
         ("homeassistant", ha), ("homeassistant.core", core),
         ("homeassistant.helpers", helpers),
+        ("homeassistant.helpers.entity_registry", entity_registry),
         ("homeassistant.helpers.storage", storage),
         ("homeassistant.util", util), ("homeassistant.util.dt", dt),
     ]:
         sys.modules[name] = mod
     helpers.storage = storage
+    helpers.entity_registry = entity_registry
     util.dt = dt
 
 
@@ -171,6 +198,68 @@ check("restoring after the trash record is gone cannot invent a row",
 # restoring an entity that was never snapshotted is not an error
 added4 = asyncio.run(s3.async_restore_scan_entries(["sensor.never"]))
 check("restoring an unknown entity is a no-op, not a crash", added4 == [])
+
+
+# ═══ 2b. the row that comes back must be TRUE, not the pre-delete snapshot ══
+# Found on a live instance: the restore worked, and the row still said
+# 已禁用. The snapshot's `disabled` is the state at scan time, and for the main
+# use of this feature that is guaranteed to be the wrong answer - an automation
+# is a candidate precisely because it was flagged disabled, so the snapshot says
+# disabled, the restore un-disables it, and replaying the snapshot re-asserts
+# the thing that was just fixed.
+print("\nrestore reports the current state, not the snapshot")
+er_mod = sys.modules["homeassistant.helpers.entity_registry"]
+
+
+def set_registry(entities):
+    er_mod._current = er_mod._EntReg(entities)
+
+
+auto = entry("automation.a", category="automation", risk_level="medium",
+             reason=["reason_auto_disabled"], disabled=True)
+
+# a) entity is enabled again -> the row must not claim it is still disabled
+s4 = make_store([auto], {})
+asyncio.run(s4.async_add_soft_deleted(["automation.a"]))
+s4._scan_data["results"] = []
+set_registry({"automation.a": er_mod._RegistryEntry(disabled=False)})
+asyncio.run(s4.async_restore_scan_entries(["automation.a"]))
+row = next((r for r in s4._scan_data["results"] if r["entity_id"] == "automation.a"), None)
+check("a restored automation is not reported as still disabled",
+      row is not None and row["disabled"] is False,
+      "this is the defect the live instance reported")
+check("the reason that was just fixed is dropped",
+      row is not None and "reason_auto_disabled" not in row["reason"],
+      "otherwise the row keeps flagging a problem that no longer exists")
+check("with no reason left the row is not still flagged medium",
+      row is not None and row["risk_level"] == "low")
+check("the analysis is preserved, not discarded",
+      row is not None and row["category"] == "automation")
+
+# b) the entity is still disabled (restore could not re-enable it) -> keep it
+s5 = make_store([auto], {})
+asyncio.run(s5.async_add_soft_deleted(["automation.a"]))
+s5._scan_data["results"] = []
+set_registry({"automation.a": er_mod._RegistryEntry(disabled=True)})
+asyncio.run(s5.async_restore_scan_entries(["automation.a"]))
+row5 = next((r for r in s5._scan_data["results"] if r["entity_id"] == "automation.a"), None)
+check("a row for an entity that is still disabled still says so",
+      row5 is not None and row5["disabled"] is True)
+check("its reason is not stripped when the disable is real",
+      row5 is not None and "reason_auto_disabled" in row5["reason"])
+
+# c) the entity is gone from the registry entirely: the snapshot is left alone
+# rather than a state being invented for it
+s6 = make_store([auto], {})
+asyncio.run(s6.async_add_soft_deleted(["automation.a"]))
+s6._scan_data["results"] = []
+set_registry({})
+asyncio.run(s6.async_restore_scan_entries(["automation.a"]))
+row6 = next((r for r in s6._scan_data["results"] if r["entity_id"] == "automation.a"), None)
+check("an entity missing from the registry keeps the snapshot unchanged",
+      row6 is not None and row6["disabled"] is True,
+      "guessing a state here would be a second invention in the same function")
+set_registry({})
 
 
 # ═══ 3. the source code keeps that order ════════════════════════════════════
