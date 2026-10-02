@@ -52,6 +52,11 @@ jobs:
       - name: Restore-truth checks can still fail
         run: python3 tools/counterproof_restore.py
 
+      # The live-instance defect: a restore that only edits the registry row
+      # never re-instantiates the entity.
+      - name: Restore engine behaviour tests
+        run: python3 tools/test_restore_engine.py
+
       - name: Compatibility claim checks
         run: python3 tools/test_compat_claims.py
 

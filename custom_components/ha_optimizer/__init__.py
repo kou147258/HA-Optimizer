@@ -79,8 +79,12 @@ async def _verified_restore(engine, hass: HomeAssistant, entity_id: str) -> dict
     mattered. Found the hard way, on a real instance, after losing two test
     automations to the very delete path this project is about.
 
-    So: if the engine says there was nothing to do, check that the entity is
-    actually still there before calling that a success.
+    It also answers `success, re_enabled=True` after only editing the registry
+    row, which is the failure this function cannot catch on its own: a live
+    instance returned exactly that for an automation that then stayed absent
+    from the state machine until `automation.reload` was issued by hand. So a
+    restore that claims to have re-enabled something is confirmed against the
+    state machine before the trash record is dropped.
     """
     result = await engine.async_restore_entity(entity_id)
     if result.get("success") and not result.get("re_enabled"):
@@ -92,8 +96,41 @@ async def _verified_restore(engine, hass: HomeAssistant, entity_id: str) -> dict
                 "entity_id": entity_id,
                 "error": "no longer in the registry - it was deleted, not disabled",
             }
+    if result.get("re_enabled") and not await _entity_is_back(hass, entity_id):
+        # The registry says enabled and the entity is still not there. Hold on
+        # to the trash record: the entity is recoverable, and dropping the
+        # record now would turn a failed restore into a real deletion.
+        _LOGGER.warning(
+            "Restore of %s reported success but the entity is not in the state "
+            "machine; keeping it in the trash", entity_id,
+        )
+        return {
+            "success": False,
+            "re_enabled": False,
+            "entity_id": entity_id,
+            "error": "re-enabled in the registry but the entity did not come back - "
+                     "try reloading it from the entity registry screen",
+        }
     result.setdefault("entity_id", entity_id)
     return result
+
+
+async def _entity_is_back(hass: HomeAssistant, entity_id: str, timeout: float = 3.0) -> bool:
+    """Wait briefly for a reloaded entity to reach the state machine.
+
+    `config_entries.async_reload` returns once setup has finished, but the state
+    machine entry is not guaranteed to be visible on the very next line on a
+    loaded instance. Failing a restore that actually worked would put a live
+    entity back in the trash, which is the safe direction but still wrong - so
+    this gives it a moment before calling it a failure.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        if hass.states.get(entity_id) is not None:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(0.1)
 
 
 def _missing_endpoint(path: str) -> None:

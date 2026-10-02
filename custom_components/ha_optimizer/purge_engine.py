@@ -130,27 +130,70 @@ class PurgeEngine:
         return results
 
     async def async_restore_entity(self, entity_id: str) -> dict:
-        """Re-enable a soft-deleted (disabled) entity. Returns dict with success + re_enabled."""
+        """Re-enable a soft-deleted (disabled) entity. Returns dict with success + re_enabled.
+
+        Clearing `disabled_by` is NOT enough on its own, and that is the whole
+        bug. The registry row flips to enabled, this function reports success,
+        and the entity still never appears - because nothing re-instantiates
+        it. Home Assistant only rebuilds an entity when the config entry that
+        owns it is set up again, and a disabled entity's entry is not set up.
+
+        Measured on a live instance: `restore` answered
+        `{success: true, re_enabled: true}`, the trash record was dropped, and
+        `automation.3333` stayed absent from the state machine until an
+        `automation.reload` was issued by hand - at which point it and four
+        other automations reappeared at once, none of which had ever been
+        deleted. Users read that as "restore deleted it".
+
+        So the registry is updated AND the owning config entry is reloaded,
+        which is what Home Assistant's own entity-registry screen does when a
+        disabled entity is re-enabled. `re_enabled` now means the entity is
+        back, not that a dictionary was edited.
+        """
         try:
             ent_reg = er.async_get(self.hass)
             entry = ent_reg.async_get(entity_id)
             if not entry:
-                _LOGGER.warning("Cannot restore %s — not found in registry", entity_id)
+                _LOGGER.warning("Cannot restore %s - not found in registry", entity_id)
                 return {"success": False, "re_enabled": False, "error": "not found in registry"}
             if not entry.disabled:
-                _LOGGER.info("Entity %s is not disabled — removing from trash only", entity_id)
-                return {"success": True, "re_enabled": False}
+                # Already enabled in the registry. It may still not be loaded -
+                # a previous restore can leave it in exactly that state - so
+                # report what is actually true rather than assuming.
+                reloaded = await self._async_reload_owner(entity_id, entry)
+                _LOGGER.info(
+                    "Entity %s is not disabled in the registry%s",
+                    entity_id, "; reloaded its config entry" if reloaded else "",
+                )
+                return {
+                    "success": True,
+                    "re_enabled": reloaded,
+                    "reloaded": reloaded,
+                    "error": None,
+                }
             # Only clear USER or INTEGRATION disabler (not SYSTEM/CONFIG_ENTRY)
             if entry.disabled_by in (
                 er.RegistryEntryDisabler.USER,
                 er.RegistryEntryDisabler.INTEGRATION,
             ):
                 ent_reg.async_update_entity(entity_id, disabled_by=None)
-                _LOGGER.info("Restored entity: %s", entity_id)
-                return {"success": True, "re_enabled": True}
+                reloaded = await self._async_reload_owner(entity_id, entry)
+                if not reloaded:
+                    _LOGGER.warning(
+                        "Re-enabled %s in the registry but no config entry could be "
+                        "reloaded; the entity may not come back until Home "
+                        "Assistant reloads it", entity_id,
+                    )
+                _LOGGER.info("Restored entity: %s (config entry reloaded: %s)", entity_id, reloaded)
+                return {
+                    "success": True,
+                    "re_enabled": True,
+                    "reloaded": reloaded,
+                    "error": None,
+                }
             else:
                 _LOGGER.warning(
-                    "Cannot restore %s — disabled by %s (not USER/INTEGRATION)",
+                    "Cannot restore %s - disabled by %s (not USER/INTEGRATION)",
                     entity_id, entry.disabled_by
                 )
                 return {
@@ -161,6 +204,27 @@ class PurgeEngine:
         except Exception as exc:
             _LOGGER.error("Failed to restore %s: %s", entity_id, exc)
             return {"success": False, "re_enabled": False, "error": str(exc)}
+
+    async def _async_reload_owner(self, entity_id: str, reg_entry) -> bool:
+        """Re-set-up the config entry that owns this entity, so it comes back.
+
+        Returns True when a reload was actually issued. An entity with no
+        owning config entry (a YAML entity, a helper) has nothing to reload -
+        for those the registry update is genuinely enough, and reporting a
+        failure would be inventing a problem.
+        """
+        entry_id = getattr(reg_entry, "config_entry_id", None)
+        if not entry_id:
+            return False
+        try:
+            await self.hass.config_entries.async_reload(entry_id)
+            _LOGGER.debug("Reloaded config entry %s to bring %s back", entry_id, entity_id)
+            return True
+        except Exception as exc:  # a failed reload must not lose the restore
+            _LOGGER.warning(
+                "Could not reload config entry %s for %s: %s", entry_id, entity_id, exc
+            )
+            return False
 
     async def async_hard_delete_soft_deleted(self, entity_ids: list[str]) -> dict[str, Any]:
         """Permanently remove entities that have been soft-deleted."""
