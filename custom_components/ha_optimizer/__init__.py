@@ -1,8 +1,11 @@
 """HA Optimizer - Smart cleanup tool for Home Assistant."""
 from __future__ import annotations
 
+import asyncio
 import logging
+import math
 import os
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -52,11 +55,40 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = []
 
-# Registry writes are cheap individually but not in bulk. Restoring or
-# emptying a trash with hundreds of entries in one pass blocks the event loop
-# long enough for HA to complain, so both walk the trash in slices and yield
-# between them.
-_BULK_BATCH = 20
+
+class _Cooperative:
+    """Yield to the event loop on a TIME budget rather than a fixed item count.
+
+    A fixed count is the wrong unit for this work. Removing a plain entity is
+    an in-memory dictionary update in the entity registry - microseconds.
+    Removing an automation or a script also tears down its config entry, which
+    is not. Twenty of the first never needed a yield; twenty of the second
+    means the loop was held for a noticeable fraction of a second. What matters
+    is how long the loop was held, so that is what gets measured.
+
+    `asyncio.sleep(0)` only hands control to tasks that are already ready; it
+    does not wait for I/O. That is the right tool here, because the work being
+    interleaved is exactly other tasks queued on the loop, but it only helps if
+    it actually happens - hence the wall-clock budget plus a hard item cap so a
+    pathological case still yields even if every single call is slow.
+    """
+
+    def __init__(self, budget_seconds: float = 0.05, max_items: int = 200):
+        self._budget = budget_seconds
+        self._max_items = max_items
+        self._last = time.monotonic()
+        self._count = 0
+        self.yields = 0
+
+    async def tick(self) -> None:
+        self._count += 1
+        now = time.monotonic()
+        if now - self._last < self._budget and self._count < self._max_items:
+            return
+        self._last = now
+        self._count = 0
+        self.yields += 1
+        await asyncio.sleep(0)
 
 
 # ================================================================
@@ -326,6 +358,7 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
         trash = await data["store"].async_get_soft_deleted()
         restored: list[str] = []
         failed: dict[str, str] = {}
+        budget = _Cooperative()
 
         for eid in list(trash):
             result = await data["engine"].async_restore_entity(eid)
@@ -333,8 +366,7 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
                 restored.append(eid)
             else:
                 failed[eid] = result.get("error") or "restore failed"
-            # yield so a large trash cannot monopolise the event loop
-            await asyncio.sleep(0)
+            await budget.tick()
 
         if restored:
             await data["store"].async_restore_scan_entries(restored)
@@ -353,50 +385,53 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
     async def handle_empty_trash(call: ServiceCall):
         """Permanently remove every entity in the trash. Irreversible.
 
-        Two things make this different from a single purge and both were
+        Two things make this different from a single purge, and both were
         learned the hard way on the delete path:
 
-        * it is batched, because removing several hundred registry entries in
-          one pass blocks the event loop;
+        * it yields on a wall-clock budget, because the work is not uniform -
+          a plain entity is an in-memory registry update while an automation
+          also tears down a config entry;
         * anything the engine could not actually remove stays in the trash. A
           hard delete that merely disabled the entity has not freed anything,
           and dropping it from the records would leave it disabled and
           untracked - nothing would ever restore or finish it.
+
+        It also separates the two kinds of "not removed". A YAML-defined
+        automation and a safety device class can NEVER be removed by this
+        tool, so telling the user only that they "stayed in the trash" invites
+        them to try again forever. Those are reported as permanent.
         """
         data = hass.data[DOMAIN][entry.entry_id]
         trash = await data["store"].async_get_soft_deleted()
         ids = list(trash)
         if not ids:
-            return {"success": True, "removed": [], "kept": [], "total": 0}
+            return {"success": True, "removed": [], "kept": {}, "kept_permanent": [],
+                    "total": 0}
 
         removed: list[str] = []
         kept: dict[str, str] = {}
-        for start in range(0, len(ids), _BULK_BATCH):
-            batch = ids[start:start + _BULK_BATCH]
-            result = await data["engine"].async_hard_delete_soft_deleted(batch)
-            gone = set(result.get("success", [])) | set(result.get("soft_deleted", []))
-            only_disabled = set(result.get("disabled_only", []))
-            removed.extend(e for e in batch if e in gone)
-            for eid in batch:
-                if eid in gone:
-                    continue
-                if eid in only_disabled:
-                    kept[eid] = "delete failed, entity only disabled - still tracked"
-                else:
-                    reason = next(
-                        (f.get("error") for f in result.get("failed", []) if f.get("entity_id") == eid),
-                        None,
-                    )
-                    if not reason and any(
-                        y.get("entity_id") == eid for y in result.get("yaml_manual", [])
-                    ):
-                        reason = "defined in YAML - remove it by hand"
-                    elif not reason and any(
-                        s.get("entity_id") == eid for s in result.get("skipped_high_risk", [])
-                    ):
-                        reason = "safety device class - never removed automatically"
-                    kept[eid] = reason or "not removed"
-            await asyncio.sleep(0)
+        permanent: list[str] = []
+        budget = _Cooperative()
+
+        for eid in ids:
+            result = await data["engine"].async_hard_delete_soft_deleted([eid])
+            if eid in set(result.get("success", [])) | set(result.get("soft_deleted", [])):
+                removed.append(eid)
+            elif eid in set(result.get("disabled_only", [])):
+                kept[eid] = "delete failed, entity only disabled - still tracked"
+            elif any(y.get("entity_id") == eid for y in result.get("yaml_manual", [])):
+                kept[eid] = "defined in YAML - this tool cannot delete it, remove it by hand"
+                permanent.append(eid)
+            elif any(s.get("entity_id") == eid for s in result.get("skipped_high_risk", [])):
+                kept[eid] = "safety device class - never removed automatically"
+                permanent.append(eid)
+            else:
+                reason = next(
+                    (f.get("error") for f in result.get("failed", []) if f.get("entity_id") == eid),
+                    None,
+                )
+                kept[eid] = reason or "not removed"
+            await budget.tick()
 
         if removed:
             await data["store"].async_remove_soft_deleted(removed)
@@ -404,8 +439,9 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
 
         if kept:
             _LOGGER.warning(
-                "Empty-trash left %d entr(ies) in the trash because they were not "
-                "actually removed: %s", len(kept), kept,
+                "Empty-trash left %d entr(ies) in the trash: %d permanently "
+                "undeletable by this tool, %d may succeed on a retry. Details: %s",
+                len(kept), len(permanent), len(kept) - len(permanent), kept,
             )
         else:
             _LOGGER.warning("Empty-trash permanently removed %d entity/entities", len(removed))
@@ -419,6 +455,7 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
             "success": not kept,
             "removed": removed,
             "kept": kept,
+            "kept_permanent": permanent,
             "total": len(ids),
         }
 
@@ -428,6 +465,16 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
         Each trash entry also carries when it will be auto-purged, so the
         panel can show the countdown instead of asking the user to remember
         what `soft_delete_days` is set to.
+
+        `days_left` is rounded UP, not truncated. The difference is one whole
+        day on every entry: an entity that went in an hour ago with
+        `soft_delete_days: 30` has 29.96 days left, and truncating showed
+        「还有 29 天」 on an entry that had plainly just been created. Ceiling
+        says 30, and only reaches 0 once the entry really is at the end.
+
+        It also has to agree with the expiry check itself, which removes an
+        entry once `(now - disabled_at).days >= days` - i.e. after the full
+        period has actually elapsed.
         """
         data = hass.data[DOMAIN][entry.entry_id]
         scan = await data["store"].async_get_scan_results()
@@ -441,7 +488,9 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
                     disabled_at = disabled_at.replace(tzinfo=now.tzinfo)
                 expires = disabled_at + timedelta(days=days)
                 meta["expires_at"] = expires.isoformat()
-                meta["days_left"] = (expires - now).days
+                # ceil, not the timedelta's truncated .days - see the docstring
+                remaining = (expires - now).total_seconds()
+                meta["days_left"] = math.ceil(remaining / 86400) if remaining > 0 else 0
             except (KeyError, ValueError, TypeError):
                 meta["expires_at"] = None
                 meta["days_left"] = None

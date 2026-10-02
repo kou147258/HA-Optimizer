@@ -2495,9 +2495,18 @@ async function performEmptyTrash() {
     const r = extractData(raw) || {};
     const removed = (r.removed || []).length;
     const kept = Object.keys(r.kept || {}).length;
+    const stuck = (r.kept_permanent || []).length;
     cancelEmptyTrash();
-    if (kept) toast('warning', t('trashEmptyDonePartial', { ok: removed, no: kept }));
-    else toast('success', t('trashEmptyDone', { n: removed }));
+    // Split the message: something this tool can never delete is a different
+    // situation from something that failed this time, and lumping them
+    // together invites the user to keep clicking on the hopeless ones.
+    if (stuck) {
+      toast('warning', t('trashEmptyDoneStuck', { ok: removed, no: stuck }));
+    } else if (kept) {
+      toast('warning', t('trashEmptyDonePartial', { ok: removed, no: kept }));
+    } else {
+      toast('success', t('trashEmptyDone', { n: removed }));
+    }
     await loadSoftDeleted();
     await _reloadScanList();
   } catch(e) {
@@ -3925,6 +3934,7 @@ const I18N = {
     trashEmptyHint: 'Type the number above to enable the button.',
     trashEmptyReady: '✓ Confirmed — the button is now live.',
     trashEmptyDone: (p) => `🗑️ Permanently deleted ${p.n} entities`,
+    trashEmptyDoneStuck: (p) => `🗑️ Deleted ${p.ok}. ${p.no} cannot be deleted by this tool at all (YAML-defined, or a safety device class) — they stay in the trash until you remove them yourself.`,
     trashEmptyDonePartial: (p) => `🗑️ Deleted ${p.ok}, but ${p.no} could not be removed and stay in the trash`,
     expiryIn: (p) => `${p.n} day(s)`,
     expiryToday: 'today',
@@ -4368,6 +4378,7 @@ const I18N = {
     trashEmptyHint: '在上方输入数字后才能点按钮。',
     trashEmptyReady: '✓ 已确认——按钮可以点了。',
     trashEmptyDone: (p) => `🗑️ 已彻底删除 ${p.n} 个实体`,
+    trashEmptyDoneStuck: (p) => `🗑️ 已删除 ${p.ok} 个。另外 ${p.no} 个本工具永远删不掉（YAML 定义的，或属于安全设备类型），它们会留在回收站，需要你手动处理。`,
     trashEmptyDonePartial: (p) => `🗑️ 删除了 ${p.ok} 个，但有 ${p.no} 个无法删除，仍留在回收站`,
     expiryIn: (p) => `还有 ${p.n} 天`,
     expiryToday: '今天到期',

@@ -176,6 +176,8 @@ check("restoring an unknown entity is a no-op, not a crash", added4 == [])
 # ═══ 3. the source code keeps that order ════════════════════════════════════
 print("\nhandle_restore order")
 init_src = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
+# read once, up front: the sections below all need it
+panel = (COMPONENT / "panel.html").read_text(encoding="utf-8")
 body = init_src[init_src.index("async def handle_restore("):]
 body = body[:body.index("\n    async def handle_restore_all(")]
 check("handle_restore calls async_restore_scan_entries", "async_restore_scan_entries" in body)
@@ -187,12 +189,21 @@ empty = init_src[init_src.index("async def handle_empty_trash("):]
 empty = empty[:empty.index("\n    hass.services.async_register(")]
 check("empty_trash keeps what it could not remove",
       "kept[eid]" in empty and "async_remove_soft_deleted(removed)" in empty)
-check("empty_trash is batched", "_BULK_BATCH" in empty)
-check("empty_trash yields between batches", "asyncio.sleep(0)" in empty)
-check("empty_trash on an empty trash is a no-op", "if not ids:" in empty)
+check("empty_trash yields on a TIME budget, not a fixed item count",
+      "budget.tick()" in empty and "_BULK_BATCH" not in init_src,
+      "a fixed count is the wrong unit: a plain entity is an in-memory dict "
+      "update while an automation also tears down a config entry")
+check("empty_trash says which entries can NEVER be removed",
+      "kept_permanent" in empty and "permanent.append(eid)" in empty,
+      "a YAML automation or a safety device class will never go away; saying "
+      "only 'stayed in the trash' invites the user to retry forever")
+check("the permanent flag reaches the panel", "kept_permanent" in panel)
+check("the panel has a distinct message for the permanent case",
+      "trashEmptyDoneStuck" in panel)
 
 restore_all = init_src[init_src.index("async def handle_restore_all("):]
 restore_all = restore_all[:restore_all.index("\n    async def handle_empty_trash(")]
+check("restore_all also yields on a time budget", "budget.tick()" in restore_all)
 check("restore_all keeps what it could not restore",
       "failed[eid]" in restore_all and "async_remove_soft_deleted(restored)" in restore_all)
 check("restore_all restores the scan entries too", "async_restore_scan_entries" in restore_all)
@@ -213,7 +224,6 @@ check("unload removes the new services",
 
 # ═══ 5. the irreversible bulk action is gated in the UI ════════════════════
 print("\nempty-trash confirmation")
-panel = (COMPONENT / "panel.html").read_text(encoding="utf-8")
 flow = panel[panel.index("function emptyTrashFlow()"):]
 flow = flow[:flow.index("function cancelEmptyTrash()")]
 check("emptying the trash asks the user to TYPE the count",
@@ -226,6 +236,29 @@ check("the typed value is compared exactly against the count",
       "input.value.trim() === String(_trashCount)" in flow)
 check("the button is enabled only when the value matches",
       "ok.disabled = !typed" in flow)
+
+# ═══ 6. the countdown has to agree with the expiry check ═══════════════════
+# Truncating timedelta.days showed 「还有 29 天」 for an entry that had been in
+# the trash for an hour with soft_delete_days=30 - one day short on every
+# entry. And it has to line up with the removal rule, which is a floor on
+# (now - disabled_at).
+print("\ncountdown arithmetic")
+get_results = init_src[init_src.index("async def handle_get_results("):]
+get_results = get_results[:get_results.index("\n    async def handle_analyze_recorder(")]
+check("days_left is rounded UP, not truncated",
+      "math.ceil(remaining / 86400)" in get_results
+      and "(expires - now).days" not in get_results,
+      "truncating loses a day on every entry")
+check("an already-expired entry reports 0, not a negative number",
+      "if remaining > 0 else 0" in get_results)
+store_src = (COMPONENT / "store.py").read_text(encoding="utf-8")
+expiry = store_src[store_src.index("async def async_get_expired_soft_deleted"):]
+check("the removal rule is a floor on the age",
+      "(now - disabled_at).days" in expiry and ">= days" in expiry)
+check("the countdown rationale is written down",
+      "rounded UP" in get_results and "agree with the expiry check" in get_results)
+
+print()
 restore_flow = panel[panel.index("async function restoreAllTrash()"):]
 restore_flow = restore_flow[:restore_flow.index("// A restored entity is put back")]
 check("restore-all uses a plain confirm (it destroys nothing)", "confirm(" in restore_flow)
