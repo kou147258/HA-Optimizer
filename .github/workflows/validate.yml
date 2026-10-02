@@ -26,6 +26,9 @@ jobs:
       - name: Check version numbers agree
         run: python3 tools/check_version.py
 
+      - name: Purge safety regression tests
+        run: python3 tools/test_purge_safety.py
+
   # ── HACS Validation ──────────────────────────────────────────────────────────
   hacs-validate:
     name: HACS Validation

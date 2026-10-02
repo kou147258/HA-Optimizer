@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, RISK_HIGH
+from .const import DOMAIN, SAFETY_DEVICE_CLASSES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,7 +30,8 @@ class PurgeEngine:
             "soft_deleted": [],        # newly disabled by this call
             "already_disabled": [],    # was already disabled before — still added to trash
             "yaml_manual": [],
-            "skipped_high_risk": [],
+            "disabled_only": [],       # delete FAILED, only disabled — kept tracked
+            "skipped_high_risk": [],   # device class forbids removing it
         }
 
         ent_reg = er.async_get(self.hass)
@@ -69,9 +70,14 @@ class PurgeEngine:
                         # Either way it goes into soft_deleted (= tracked in trash)
                         results["soft_deleted"].append(entity_id)
                     else:
-                        ok = await self._remove_by_domain(entity_id)
-                        if ok:
+                        outcome = await self._remove_by_domain(entity_id)
+                        if outcome == "removed":
                             results["success"].append(entity_id)
+                        elif outcome == "disabled":
+                            # It is NOT gone. Reporting this as a success made
+                            # a failed hard delete look completed, and the
+                            # entity stopped being tracked in the trash.
+                            results["disabled_only"].append(entity_id)
                         else:
                             results["yaml_manual"].append({
                                 "entity_id": entity_id,
@@ -160,81 +166,56 @@ class PurgeEngine:
         """Permanently remove entities that have been soft-deleted."""
         return await self.async_purge_entities(entity_ids, soft_delete=False)
 
-    async def _remove_by_domain(self, entity_id: str) -> bool:
-        """Try domain-specific removal for automations/scripts via their config entry."""
-        domain = entity_id.split(".")[0]
-        try:
-            if domain == "automation":
-                # Automations created via UI have a config entry — delete it
-                config_entries = self.hass.config_entries.async_entries("automation")
-                uid = entity_id.replace("automation.", "")
-                for entry in config_entries:
-                    if entry.unique_id == uid or entry.entry_id == uid:
-                        await self.hass.config_entries.async_remove(entry.entry_id)
-                        _LOGGER.info("Deleted automation config entry: %s", entity_id)
-                        return True
-                # Fallback: use automation.delete service (HA 2024.4+)
-                try:
-                    await self.hass.services.async_call(
-                        "automation", "reload", {}, blocking=True
-                    )
-                    # Try websocket-style delete via automations component
-                    from homeassistant.components.automation import (
-                        AutomationStorageCollection,
-                    )
-                    store = self.hass.data.get("automation_storage")
-                    if store and uid:
-                        await store.async_delete_item(uid)
-                        _LOGGER.info("Deleted automation via storage: %s", entity_id)
-                        return True
-                except Exception as inner:
-                    _LOGGER.debug("automation storage delete failed: %s", inner)
-                # Last resort: disable so it stops running
-                ent_reg = er.async_get(self.hass)
-                entry = ent_reg.async_get(entity_id)
-                if entry:
-                    ent_reg.async_update_entity(
-                        entity_id,
-                        disabled_by=er.RegistryEntryDisabler.USER,
-                    )
-                    _LOGGER.info("Disabled automation (could not delete): %s", entity_id)
-                    return True
-                return False
+    async def _remove_by_domain(self, entity_id: str) -> str:
+        """Remove an automation/script through its config entry.
 
-            elif domain == "script":
-                # Scripts created via UI have a config entry
-                uid = entity_id.replace("script.", "")
-                config_entries = self.hass.config_entries.async_entries("script")
-                for entry in config_entries:
-                    if entry.unique_id == uid or entry.entry_id == uid:
-                        await self.hass.config_entries.async_remove(entry.entry_id)
-                        _LOGGER.info("Deleted script config entry: %s", entity_id)
-                        return True
-                # Fallback: scripts storage
-                try:
-                    from homeassistant.components.script import ScriptStorageCollection
-                    store = self.hass.data.get("script_storage")
-                    if store and uid:
-                        await store.async_delete_item(uid)
-                        _LOGGER.info("Deleted script via storage: %s", entity_id)
-                        return True
-                except Exception as inner:
-                    _LOGGER.debug("script storage delete failed: %s", inner)
-                # Disable as fallback
-                ent_reg = er.async_get(self.hass)
-                entry = ent_reg.async_get(entity_id)
-                if entry:
-                    ent_reg.async_update_entity(
-                        entity_id,
-                        disabled_by=er.RegistryEntryDisabler.USER,
-                    )
-                    _LOGGER.info("Disabled script (could not delete): %s", entity_id)
-                    return True
-                return False
+        Returns one of:
+          "removed"  - really gone
+          "disabled" - could not be deleted, so it was only disabled; the
+                       caller must NOT report this as a success, and the
+                       entity must not be dropped from the trash records
+          "not_found" - nothing to act on
+
+        The previous version returned True from the "disabled" branch, so a
+        failed hard delete was reported to the user as a completed one — and
+        the entity was left disabled but untracked, meaning nothing would
+        ever restore or finish it. It also probed hass.data["automation_storage"]
+        and hass.data["script_storage"], which do not exist in Home Assistant,
+        so that path could never fire.
+        """
+        domain = entity_id.split(".")[0]
+        if domain not in ("automation", "script"):
+            return "not_found"
+
+        try:
+            # The entity registry entry carries the config entry that owns it.
+            # That is the only reliable link: the entity_id slug, the config
+            # entry's unique_id and its entry_id are all different things.
+            ent_reg = er.async_get(self.hass)
+            reg_entry = ent_reg.async_get(entity_id)
+            entry_id = getattr(reg_entry, "config_entry_id", None)
+            if entry_id:
+                await self.hass.config_entries.async_remove(entry_id)
+                _LOGGER.info("Deleted %s config entry %s", domain, entry_id)
+                return "removed"
+            else:
+                # YAML-defined: no config entry owns it, so it cannot be
+                # deleted from here at all.
+                _LOGGER.info(
+                    "%s has no config entry (YAML-defined) - cannot delete", entity_id
+                )
+                return "not_found"
 
         except Exception as exc:
-            _LOGGER.debug("Could not remove %s via domain: %s", entity_id, exc)
-        return False
+            _LOGGER.warning(
+                "Could not delete %s: %s - disabling instead", entity_id, exc
+            )
+            ent_reg = er.async_get(self.hass)
+            if ent_reg.async_get(entity_id):
+                ent_reg.async_update_entity(
+                    entity_id, disabled_by=er.RegistryEntryDisabler.USER
+                )
+            return "disabled"
 
     async def async_get_dependency_map(self, entity_id: str) -> dict[str, Any]:
         """Get all places where an entity is referenced (for impact analysis)."""
@@ -275,7 +256,9 @@ class PurgeEngine:
         return deps
 
 
-_SAFETY_CLASSES = {
-    "smoke", "moisture", "gas", "carbon_monoxide", "carbon_dioxide",
-    "safety", "tamper", "lock", "battery", "problem",
-}
+# Device classes that must never be removed here. This used to be a second,
+# hand-maintained copy of SAFETY_DEVICE_CLASSES that had silently drifted: it
+# was missing door, window, motion, occupancy, vibration and sound, so the
+# execution layer would happily hard-delete a door sensor or a motion sensor
+# that the scanner had been careful never to suggest. One source of truth now.
+_SAFETY_CLASSES = SAFETY_DEVICE_CLASSES

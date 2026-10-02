@@ -235,11 +235,23 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
         if soft and result.get("soft_deleted"):
             await data["store"].async_add_soft_deleted(result["soft_deleted"])
 
-        # Remove from stored scan results only the newly-processed entities
-        processed = (
-            result.get("success", [])
-            + result.get("soft_deleted", [])
-        )
+        # A hard delete that only managed to disable the entity must still be
+        # tracked in the trash, otherwise the user has no way back: it is
+        # disabled, untracked, and nothing will ever restore or finish it.
+        if not soft and result.get("disabled_only"):
+            await data["store"].async_add_soft_deleted(result["disabled_only"])
+
+        if result.get("disabled_only"):
+            _LOGGER.warning(
+                "Hard delete did not remove %d entity/entities, only disabled them; "
+                "they stay in the trash: %s",
+                len(result["disabled_only"]), result["disabled_only"],
+            )
+
+        # Remove from stored scan results only the entities that really went away
+        processed = result.get("success", [])
+        if soft:
+            processed = processed + result.get("soft_deleted", [])
         if processed:
             await data["store"].async_remove_from_scan_results(processed)
 
@@ -711,7 +723,14 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry):
 
 
 async def _async_check_soft_delete_expiry(hass: HomeAssistant, entry: ConfigEntry):
-    """Check for soft-deleted entities that have expired and hard-delete them."""
+    """Check for soft-deleted entities that have expired and hard-delete them.
+
+    This runs unattended every 6 hours and is irreversible, so it never does it
+    quietly: every batch is logged at warning level, raised as a persistent
+    notification, and announced on the event bus. If a purge engine refuses to
+    remove something, that entity is reported rather than silently dropped
+    from the trash bookkeeping.
+    """
     data = hass.data[DOMAIN].get(entry.entry_id)
     if not data:
         return
@@ -719,12 +738,52 @@ async def _async_check_soft_delete_expiry(hass: HomeAssistant, entry: ConfigEntr
     expired = await data["store"].async_get_expired_soft_deleted(soft_days)
     if not expired:
         return
-    _LOGGER.info("Hard-deleting %d expired soft-deleted entities: %s", len(expired), expired)
-    result = await data["engine"].async_hard_delete_soft_deleted(expired)
-    await data["store"].async_remove_soft_deleted(
-        result.get("success", []) + result.get("soft_deleted", [])
+
+    _LOGGER.warning(
+        "Auto-expiring %d soft-deleted entity/entities older than %d day(s): %s",
+        len(expired), soft_days, expired,
     )
+    result = await data["engine"].async_hard_delete_soft_deleted(expired)
+    removed = result.get("success", []) + result.get("soft_deleted", [])
+
+    # Anything the engine could not actually remove must stay in the trash
+    # records, otherwise it is a ghost: still disabled, but no longer tracked,
+    # so nothing will ever restore or finish it.
+    still_tracked = [e for e in expired if e not in removed]
+    if still_tracked:
+        _LOGGER.warning(
+            "Auto-expiry could not remove %d entity/entities, leaving them in the "
+            "trash: %s", len(still_tracked), still_tracked,
+        )
+    await data["store"].async_remove_soft_deleted(removed)
+
     hass.bus.async_fire(EVENT_PURGE_COMPLETE, {
         "type": "auto_hard_delete",
         "result": result,
     })
+
+    if removed or still_tracked:
+        try:
+            from homeassistant.components import persistent_notification
+        except ImportError:  # pragma: no cover - notification is best effort
+            return
+        lines = [
+            f"HA Optimizer permanently removed {len(removed)} entity/entities that had been "
+            f"disabled for more than {soft_days} day(s). This cannot be undone.",
+            "",
+            *removed[:25],
+        ]
+        if len(removed) > 25:
+            lines.append(f"... and {len(removed) - 25} more")
+        if still_tracked:
+            lines += [
+                "",
+                f"{len(still_tracked)} could not be removed and are still tracked:",
+                *still_tracked[:10],
+            ]
+        persistent_notification.async_create(
+            hass,
+            "HA Optimizer: automatic trash expiry",
+            "\n".join(lines),
+            notification_id="ha_optimizer_auto_purge",
+        )
