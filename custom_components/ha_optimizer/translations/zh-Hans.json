@@ -1,0 +1,119 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HA Optimizer 设置",
+        "description": "配置 HA Optimizer。它会扫描你的 Home Assistant，找出不用的实体、自动化、脚本和辅助实体。",
+        "data": {
+          "scan_interval_days": "自动扫描间隔（天，0 表示关闭）",
+          "stale_days_threshold": "多少天没有状态变化算作陈旧",
+          "enable_soft_delete": "启用软删除（先禁用，再彻底删除）",
+          "soft_delete_days": "软删除后保留多少天再彻底删除",
+          "exclude_device_classes": "始终排除的设备类型（逗号分隔）"
+        },
+        "data_description": {
+          "scan_interval_days": "填 0 可关闭自动扫描。推荐 7 天。",
+          "stale_days_threshold": "超过这个天数没有任何状态变化的实体会被标记。推荐 30 天。",
+          "enable_soft_delete": "启用后，实体会先被禁用（可恢复），之后才会被彻底删除。",
+          "soft_delete_days": "在回收站里放满这些天后，实体会被自动彻底删除。",
+          "exclude_device_classes": "这些设备类型永远不会被建议删除，用逗号分隔（例如 smoke,motion,door）。"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "无法连接到 Home Assistant 内部接口",
+      "unknown": "发生未知错误"
+    },
+    "abort": {
+      "already_configured": "HA Optimizer 已经配置过了"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HA Optimizer 选项",
+        "description": "调整 HA Optimizer 的设置，保存后立即生效。",
+        "data": {
+          "scan_interval_days": "自动扫描间隔（天，0 表示关闭）",
+          "stale_days_threshold": "多少天没有状态变化算作陈旧",
+          "enable_soft_delete": "启用软删除（先禁用，再彻底删除）",
+          "soft_delete_days": "软删除后保留多少天再彻底删除",
+          "exclude_device_classes": "始终排除的设备类型（逗号分隔）"
+        },
+        "data_description": {
+          "scan_interval_days": "填 0 可关闭自动扫描。推荐 7 天。",
+          "stale_days_threshold": "超过这个天数没有任何状态变化的实体会被标记。推荐 30 天。",
+          "enable_soft_delete": "启用后，实体会先被禁用（可恢复），之后才会被彻底删除。",
+          "soft_delete_days": "在回收站里放满这些天后，实体会被自动彻底删除。",
+          "exclude_device_classes": "这些设备类型永远不会被建议删除，用逗号分隔（例如 smoke,motion,door）。"
+        }
+      }
+    }
+  },
+  "services": {
+    "scan": {
+      "name": "扫描不用的实体",
+      "description": "扫描 Home Assistant，找出不用的实体、自动化、脚本和辅助实体。结果会保存，并触发一个事件。"
+    },
+    "purge": {
+      "name": "清理选中的实体",
+      "description": "清理（禁用或删除）指定的实体。soft_delete=true 表示禁用（可恢复），false 表示彻底删除。",
+      "fields": {
+        "entity_ids": {
+          "name": "实体 ID 列表",
+          "description": "要清理的 entity_id 列表。"
+        },
+        "soft_delete": {
+          "name": "软删除",
+          "description": "填 true（默认）时，实体被禁用并移入回收站，可以恢复。填 false 时，实体被彻底删除。"
+        }
+      }
+    },
+    "restore": {
+      "name": "恢复软删除的实体",
+      "description": "重新启用之前被软删除（禁用）的实体，并把它从回收站移出。",
+      "fields": {
+        "entity_id": {
+          "name": "实体 ID",
+          "description": "要恢复的 entity_id。"
+        }
+      }
+    },
+    "get_results": {
+      "name": "获取上次扫描结果",
+      "description": "以服务响应返回上次扫描的结果，包含回收站（软删除）里的实体。"
+    },
+    "analyze_fingerprint": {
+      "name": "分析指纹",
+      "description": "把今天的 HA 表现和它自己的历史基线对比，发现状态写入、自动化触发、集成重连上的异常。"
+    },
+    "collect_baseline": {
+      "name": "采集基线",
+      "description": "采集昨天的指标快照并存入基线库。通常每天 00:05 自动运行，首次安装时可手动调用一次。"
+    },
+    "analyze_recorder": {
+      "name": "分析记录器数据库",
+      "description": "查询 recorder 数据库，找出写入最多的实体、浪费的记录，并给出 recorder 的 YAML 优化建议。"
+    },
+    "analyze_dashboard": {
+      "name": "分析仪表盘",
+      "description": "读取 .storage 里的 Lovelace 仪表盘配置，找出重负载卡片、缺失实体等性能问题。"
+    },
+    "analyze_storms": {
+      "name": "检测状态风暴",
+      "description": "找出状态变化异常频繁的实体，它们会让数据库膨胀、拖慢浏览器。"
+    },
+    "analyze_dead_code": {
+      "name": "分析自动化死代码",
+      "description": "扫描自动化，找出引用了已不存在实体的触发器、动作或条件。"
+    },
+    "analyze_health": {
+      "name": "检查集成健康度",
+      "description": "根据最近 7 天的重连频率、电量水平和不可用情况，给集成打健康分。"
+    },
+    "analyze_addons": {
+      "name": "分析插件",
+      "description": "查询 Supervisor 接口，返回主机资源占用（CPU、内存、磁盘、系统）以及全部插件的列表，含每个插件的状态、版本、更新情况和运行统计。"
+    }
+  }
+}

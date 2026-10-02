@@ -32,6 +32,9 @@ jobs:
       - name: Panel sync and service registration regression tests
         run: python3 tools/test_panel_sync.py
 
+      - name: Filter behaviour tests
+        run: node tools/test_filters.js
+
   # ── HACS Validation ──────────────────────────────────────────────────────────
   hacs-validate:
     name: HACS Validation

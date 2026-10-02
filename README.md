@@ -1,7 +1,7 @@
 # 🧹 HA Optimizer
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-1.5.2-blue)
+![version](https://img.shields.io/badge/version-1.6.0-blue)
 ![HA](https://img.shields.io/badge/Home%20Assistant-2023.1+-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.11+-yellow)
@@ -368,6 +368,20 @@ automation:
 >
 > - `scan` and `collect_baseline` **write their results to storage**, so scheduling them is genuinely useful; the panel reads what they stored.
 > - The seven `analyze_*` services and `get_results` are **compute-and-return**: they answer with the data and store nothing. A scheduled call from an automation runs the analysis and discards the result. Use these from the panel, or from a tool that can surface a service response.
+
+### Telling enabled automations apart from disabled ones
+
+The results table has a fourth filter for it, next to risk / type / source:
+
+| Filter | What it selects |
+|---|---|
+| 全部状态 | everything |
+| 启用中 | automations and other results that are currently enabled |
+| 已禁用 | automations and other results that are currently disabled |
+
+Every automation row also carries a badge — ✅ 启用中 or ⛔ 已禁用 — so you can see the split without touching the filter. Rows in other categories show the badge only when they are disabled.
+
+A disabled automation is a **state fact, not a risk judgement**: it does not change its risk level. "Disabled" and "high risk" are different questions, and the panel keeps them separate.
 
 ---
 

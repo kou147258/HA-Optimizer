@@ -25,6 +25,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import os
+import re
 import sys
 import tempfile
 import time
@@ -234,18 +235,80 @@ check("all 10 read-only services declare OPTIONAL", registrations == 10,
 check("the ONLY/OPTIONAL decision is explained in a comment",
       "ONLY means" in source and "return_response" in source)
 
+
 # ═══ 3. the panel still asks for responses, so OPTIONAL changes nothing ═════
 print("\npanel consistency")
 panel = (COMPONENT / "panel.html").read_text(encoding="utf-8")
-with_response = set()
-import re
 m = re.search(r"SERVICES_WITH_RESPONSE\s*=\s*new Set\(\[([^\]]*)\]\)", panel)
-if m:
-    with_response = set(re.findall(r"'([a-z_]+)'", m.group(1)))
+with_response = set(re.findall(r"'([a-z_]+)'", m.group(1))) if m else set()
 check("the panel still requests responses for all 10 read-only services",
       len(with_response) == 10, f"found {sorted(with_response)}")
 check("no read-only service was dropped from the panel's response set",
       {"scan", "get_results", "analyze_health", "analyze_addons"} <= with_response)
+
+
+# ═══ 4. filter <option> labels must be matched by value, not by index ══════
+# The labels used to be applied positionally, from a key list written
+# separately from the <option> markup. That silently mislabelled the second
+# option onwards: filterCat's keys were ordered entity/helper/automation/
+# script-to-automation/script-to-script/helper, so picking "自动化" filtered
+# `helper`, and filterYaml's two keys were swapped so "YAML" displayed the
+# Registry label. Both are invisible in review and obvious the moment you
+# click the dropdown.
+print("\nfilter option labels")
+
+# There are exactly two dictionaries, so "declared in both" is simply
+# "declared twice". Slicing the blocks apart textually is not worth it: the
+# dictionaries close mid-line (`addonsNone: '…',}};`), so a `\n  },` anchor
+# finds nothing and silently yields an empty string.
+i18n_src = panel
+shell = panel
+
+
+def declared_how_often(key: str) -> int:
+    return len(re.findall(rf"^\s+{re.escape(key)}\s*:", i18n_src, re.M))
+
+for select_id in ("filterRisk", "filterCat", "filterYaml", "filterState"):
+    block = re.search(rf'id="{select_id}"[^>]*>(.*?)</select>', shell, re.S)
+    check(f"#{select_id} exists in the markup", block is not None)
+    if not block:
+        continue
+    values = re.findall(r'<option value="([^"]*)"', block.group(1))
+    call = re.search(rf"_labelOptions\('{select_id}', \{{(.*?)\}}\)", shell, re.S)
+    check(f"#{select_id} is labelled by value, not by index", call is not None)
+    if not call:
+        continue
+    # the value→key map is a JS object literal whose keys are mostly UNQUOTED
+    # (`low: 'filterLow'`), and the empty option value is the quoted `''`
+    keys = dict(re.findall(r"'?([A-Za-z0-9_]*)'?\s*:\s*'([^']*)'", call.group(1)))
+    unlabelled = [v for v in values if v not in keys]
+    check(f"#{select_id}: every option value has a key", not unlabelled,
+          f"unlabelled: {unlabelled} (parsed keys: {sorted(keys)})")
+    stale = [k for k in keys if k not in values]
+    check(f"#{select_id}: no key without a matching option", not stale,
+          f"orphaned: {stale}")
+    for key in keys.values():
+        check(f"#{select_id}: key '{key}' is declared in both dictionaries",
+              declared_how_often(key) == 2, f"declared {declared_how_often(key)}x")
+
+check("no positional option labelling is left anywhere",
+      "options].forEach((opt, i)" not in shell)
+
+# ═══ 5. no hardcoded upstream locale in printed timestamps ═════════════════
+# Two timestamps were formatted with toLocaleString('vi-VN'), upstream's source
+# language, so a Chinese or English user was shown upstream's date conventions
+# no matter what they picked. print-time formatting must follow the panel.
+vn = re.findall(r"toLocale(?:Time|Date)?String\('vi-VN'\)", shell)
+check("no timestamp is formatted with a hardcoded vi-VN locale", not vn,
+      f"{len(vn)} occurrence(s)")
+check("the locale helper exists and is used",
+      shell.count("_panelLocale()") >= 3,
+      f"{shell.count('_panelLocale()')} reference(s)")
+
+# risk levels are still only the three defined values, and a disabled
+# automation is never signalled by changing one
+check("risk levels are still only the three defined values",
+      all(f"risk-{r}" in shell for r in ("low", "medium", "high")))
 
 
 print()

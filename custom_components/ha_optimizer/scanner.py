@@ -405,6 +405,16 @@ class DataScanner:
                 reg_entry = ent_reg.async_get(entity_id)
                 unique_id = reg_entry.unique_id if reg_entry else None
 
+                # Structured disabled state, so the panel can filter and badge
+                # automations instead of only having to read it out of a reason
+                # string. Two independent sources: the entity registry (a
+                # registry-backed automation disabled in the UI) and the state
+                # machine (covers YAML automations, which have no registry
+                # entry, and UI automations disabled via the state).
+                disabled = state.state == "off"
+                if reg_entry is not None and reg_entry.disabled_by is not None:
+                    disabled = True
+
                 used_in = self._enrich_runtime_usage(entity_id, list(references.get(entity_id, [])))
                 results.append(ScanResult(
                     entity_id=entity_id,
@@ -416,6 +426,7 @@ class DataScanner:
                     last_changed=last_dt,
                     used_in=used_in,
                     unique_id=unique_id,
+                    disabled=disabled,
                 ))
         except Exception as exc:
             _LOGGER.warning("Error scanning automations: %s", exc)

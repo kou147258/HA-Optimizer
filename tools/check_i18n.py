@@ -487,6 +487,68 @@ def main() -> int:
                 "items keep the language the page booted in"
             )
 
+    # ── Home Assistant's own translation surface ────────────────────────────
+    # The panel dictionary is not the only thing a user reads. The config flow
+    # and the options dialog are rendered by Home Assistant from
+    # `strings.json` (English) plus `translations/<lang>.json`, and they are a
+    # completely separate namespace from `I18N` in panel.html. Key parity above
+    # cannot see it at all: shipping a panel with a flawless dictionary and no
+    # translations directory leaves the setup dialog showing raw field keys
+    # (`scan_interval_days`, `enable_soft_delete`) in a Chinese UI.
+    import json
+
+    strings_file = COMPONENT / "strings.json"
+    zh_file = COMPONENT / "translations" / "zh-Hans.json"
+
+    def leaves(node, prefix=""):
+        out = set()
+        if isinstance(node, dict):
+            for k, v in node.items():
+                p = f"{prefix}.{k}" if prefix else k
+                out |= leaves(v, p) if isinstance(v, dict) else {p}
+        return out
+
+    en_doc = zh_doc = None
+    if not strings_file.is_file():
+        problems.append("strings.json is missing - the config flow would show raw field keys")
+    else:
+        try:
+            en_doc = json.loads(strings_file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            problems.append(f"strings.json is not valid JSON: {exc}")
+    if not zh_file.is_file():
+        problems.append(
+            "translations/zh-Hans.json is missing - the config flow and the options "
+            "dialog will not be translated into Chinese"
+        )
+    else:
+        try:
+            zh_doc = json.loads(zh_file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            problems.append(f"translations/zh-Hans.json is not valid JSON: {exc}")
+
+    if en_doc is not None and zh_doc is not None:
+        en_keys = leaves(en_doc)
+        zh_keys = leaves(zh_doc)
+        scope = lambda s: {k for k in s if k.split(".")[0] in ("config", "options", "services")}  # noqa: E731
+        missing = scope(en_keys) - zh_keys
+        extra = scope(zh_keys) - en_keys
+        for k in sorted(missing)[:10]:
+            problems.append(f"[zh-Hans] missing string for the HA UI: {k}")
+        if len(missing) > 10:
+            problems.append(f"[zh-Hans] ... and {len(missing) - 10} more missing HA UI strings")
+        # A config-flow field with no label is what the user actually sees; say
+        # so specifically instead of leaving it in a generic key diff.
+        for k in sorted(missing):
+            if ".data." in k:
+                problems.append(
+                    f"config-flow field '{k.split('.')[-1]}' would render as a raw key in the dialog"
+                )
+        for k in sorted(extra)[:5]:
+            problems.append(f"[zh-Hans] has a string that strings.json does not: {k}")
+        if not missing and not extra:
+            print(f"HA UI strings: {len(scope(en_keys))} in strings.json, all present in zh-Hans")
+
     if not args.quiet:
         print(f"languages : {len(i18n)} ({', '.join(sorted(i18n))})")
         print(f"keys      : {len(base_keys)} (reference: {BASE})")

@@ -531,6 +531,22 @@
     border: 1px solid var(--border);
   }
 
+  /* ENABLED / DISABLED BADGE — deliberately not a risk signal. A disabled
+     automation is a fact about its state, not a judgement about how safe it is
+     to remove, so it gets its own badge rather than a risk level. */
+  .state-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 8px;
+    border-radius: 100px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .state-badge.on { background: rgba(76,175,80,0.15); color: var(--low-risk); border: 1px solid rgba(76,175,80,0.3); }
+  .state-badge.off { background: rgba(140,140,150,0.18); color: var(--text-muted); border: 1px solid rgba(140,140,150,0.35); }
+
   /* REASON TAGS */
   .reasons { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
   .reason-tag {
@@ -1181,6 +1197,11 @@
           <option value="yaml" data-i18n="filterYaml">YAML</option>
           <option value="registry" data-i18n="filterRegistry">Registry</option>
         </select>
+        <select class="filter-select" id="filterState" onchange="applyFilters()">
+          <option value="" data-i18n="filterAllState">All states</option>
+          <option value="enabled" data-i18n="filterEnabled">Enabled</option>
+          <option value="disabled" data-i18n="filterDisabled">Disabled</option>
+        </select>
       </div>
       <button class="btn btn-ghost" onclick="selectAll()" id="btnSelectAll" disabled>☑️ <span data-i18n="btnSelectAll">☑️ Select All</span></button>
     </div>
@@ -1594,7 +1615,7 @@ async function loadLastResults() {
         displayResults(parsed.results);
         updateStats(parsed.statistics || {});
         const scanTime = parsed.statistics?.scanned_at
-          ? new Date(parsed.statistics.scanned_at).toLocaleString('vi-VN')
+          ? new Date(parsed.statistics.scanned_at).toLocaleString(_panelLocale())
           : '?';
         toast('info', `📦 ${t('lastUpdateLabel')} ${scanTime}`);
         return;
@@ -1862,6 +1883,7 @@ function applyFilters() {
   const risk = document.getElementById('filterRisk').value;
   const cat = document.getElementById('filterCat').value;
   const yaml = document.getElementById('filterYaml').value;
+  const state = document.getElementById('filterState').value;
 
   filteredResults = allResults.filter(r => {
     if (search && !r.entity_id.toLowerCase().includes(search) && !r.name.toLowerCase().includes(search)) return false;
@@ -1869,6 +1891,8 @@ function applyFilters() {
     if (cat && r.category !== cat) return false;
     if (yaml === 'yaml' && !r.is_yaml_entity) return false;
     if (yaml === 'registry' && r.is_yaml_entity) return false;
+    if (state === 'enabled' && r.disabled) return false;
+    if (state === 'disabled' && !r.disabled) return false;
     return true;
   });
 
@@ -2058,6 +2082,14 @@ function renderTable() {
       : `<span style="color:var(--text-muted); font-size:0.75rem">${t('filterRegistry')}</span>`;
     const reasons = (r.reason || []).map(rs => `<span class="reason-tag">${tVal(rs)}</span>`).join('');
 
+    // Enabled/disabled is a state fact, not a risk judgement. Shown for every
+    // automation (that is the point of the request) and for everything else
+    // only when disabled, so a table of entities does not turn into a wall of
+    // "enabled" badges.
+    const stateBadge = (r.category === 'automation' || r.disabled)
+      ? `<span class="state-badge ${r.disabled ? 'off' : 'on'}" title="${r.disabled ? t('stateDisabledTitle') : t('stateEnabledTitle')}">${r.disabled ? '⛔ ' + t('badgeDisabled') : '✅ ' + t('badgeEnabled')}</span>`
+      : '';
+
     return `<tr class="${isSelected ? 'selected' : ''}" data-id="${r.entity_id}">
       <td class="cb-wrap"><input type="checkbox" ${isSelected ? 'checked' : ''} onchange="toggleSelect('${r.entity_id}', this)"></td>
       <td>
@@ -2069,7 +2101,7 @@ function renderTable() {
           ${entityLink}
         </div>
       </td>
-      <td><span class="cat-badge">${catLabel}</span></td>
+      <td><span class="cat-badge">${catLabel}</span> ${stateBadge}</td>
       <td><span class="risk-badge ${riskClass}">${riskLabel}</span></td>
       <td><div class="reasons">${reasons}</div></td>
       <td style="white-space:nowrap; color:var(--text-muted)">${lastChanged}</td>
@@ -3597,6 +3629,17 @@ function loadSavedTheme() {
 
 // Theme and lang are loaded together in DOMContentLoaded below
 
+/**
+ * The locale used for every timestamp the panel prints. These used to be
+ * hardcoded to 'vi-VN', upstream's source language, so a Chinese or English
+ * user was shown dd/mm/yyyy with the upstream's date conventions regardless
+ * of their settings. Follow whatever the panel is currently rendering in.
+ */
+function _panelLocale() {
+  return currentLang === 'zh' ? 'zh-CN' : 'en-GB';
+}
+
+
 // ================================================================
 // TOAST
 // ================================================================
@@ -3661,6 +3704,13 @@ const I18N = {
     filterScript: 'Script',
     filterHelper: 'Helper',
     filterAllSource: 'All sources',
+    filterAllState: 'All states',
+    filterEnabled: 'Enabled',
+    filterDisabled: 'Disabled',
+    badgeEnabled: 'Enabled',
+    badgeDisabled: 'Disabled',
+    stateEnabledTitle: 'This automation is currently enabled',
+    stateDisabledTitle: 'This automation is currently disabled',
     filterRegistry: 'Registry',
     filterYaml: 'YAML',
     statTotal: 'Total Entities',
@@ -4078,6 +4128,13 @@ const I18N = {
     filterScript: '脚本',
     filterHelper: '辅助实体',
     filterAllSource: '全部来源',
+    filterAllState: '全部状态',
+    filterEnabled: '启用中',
+    filterDisabled: '已禁用',
+    badgeEnabled: '启用中',
+    badgeDisabled: '已禁用',
+    stateEnabledTitle: '这个自动化当前是启用状态',
+    stateDisabledTitle: '这个自动化当前是禁用状态',
     filterRegistry: '注册表',
     filterYaml: 'YAML',
     statTotal: '实体总数',
@@ -4659,23 +4716,28 @@ function _applyTranslations() {
   const searchEl = _el('searchInput');
   if (searchEl) searchEl.placeholder = t('searchPlaceholder');
 
-  const filterRisk = _el('filterRisk');
-  if (filterRisk) {
-    const keys = ['filterAll', 'filterLow', 'filterMedium', 'filterHigh'];
-    [...filterRisk.options].forEach((opt, i) => { if (keys[i]) opt.text = t(keys[i]); });
-  }
-
-  const filterCat = _el('filterCat');
-  if (filterCat) {
-    const keys = ['filterAllCat','filterEntity','filterAutomation','filterScript','filterHelper'];
-    [...filterCat.options].forEach((opt, i) => { if (keys[i]) opt.text = t(keys[i]); });
-  }
-
-  const filterYamlEl = _el('filterYaml');
-  if (filterYamlEl) {
-    const keys = ['filterAllSource','filterRegistry','filterYaml'];
-    [...filterYamlEl.options].forEach((opt, i) => { if (keys[i]) opt.text = t(keys[i]); });
-  }
+  // Filter <option> labels are matched by VALUE, never by index. The indexed
+  // version was wrong in two places: filterCat's key list was ordered
+  // entity/helper/automation/script while the options are
+  // entity/helper/automation/script in a different order, so choosing
+  // "自动化" filtered `helper`; and filterYaml's two keys were swapped, so
+  // "YAML" showed the Registry label. Index alignment looks fine in review and
+  // silently mislabels every option from the second one down.
+  const _labelOptions = (elId, keys) => {
+    const el = _el(elId);
+    if (!el) return;
+    [...el.options].forEach((opt) => {
+      const key = keys[opt.value];
+      if (key) opt.text = t(key);
+    });
+  };
+  _labelOptions('filterRisk', { '': 'filterAll', low: 'filterLow', medium: 'filterMedium', high: 'filterHigh' });
+  _labelOptions('filterCat', {
+    '': 'filterAllCat', entity: 'filterEntity', helper: 'filterHelper',
+    automation: 'filterAutomation', script: 'filterScript',
+  });
+  _labelOptions('filterYaml', { '': 'filterAllSource', yaml: 'filterYaml', registry: 'filterRegistry' });
+  _labelOptions('filterState', { '': 'filterAllState', enabled: 'filterEnabled', disabled: 'filterDisabled' });
 
   // ── Table headers
   const _th = (sel, key) => { const el = document.querySelector(sel); if (el) el.textContent = t(key); };
@@ -4810,7 +4872,7 @@ async function _addonRealtimeTick() {
       // Also refresh addon CPU/RAM numbers in table without full re-render
       _patchAddonStats(data.addons || []);
       const ts = document.getElementById('addonLastRefresh');
-      if (ts) ts.textContent = '🕐 ' + new Date().toLocaleTimeString('vi-VN');
+      if (ts) ts.textContent = '🕐 ' + new Date().toLocaleTimeString(_panelLocale());
     }
   } catch(e) { _LOGGER_js('Realtime refresh error:', e); }
   if (_addonRealtimeOn) _addonRealtimeTimer = setTimeout(_addonRealtimeTick, 5000);

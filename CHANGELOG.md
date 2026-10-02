@@ -7,6 +7,26 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ---
 
+## [1.6.0] - 2026-10-02
+
+The config flow is finally translated, automations can be sorted by whether
+they are enabled, and two long-standing label bugs that made the panel
+misreport what it was showing came out of it.
+
+### Fixed
+- 🇨🇳 **The config-flow and options dialogs were never translated.** `strings.json` was complete but English-only and there was no `translations/` directory, so the setup dialog showed the raw field keys — `scan_interval_days`, `stale_days_threshold`, `enable_soft_delete` — in a Chinese panel. `translations/zh-Hans.json` now carries all 57 strings: every field label, every field description, both step titles, the error and abort reasons, and all twelve service names and descriptions. `check_i18n.py` gained a check for this whole namespace, and it names the offending field rather than dumping a key diff.
+- 🏷️ **The type filter was off by one, and the source filter had YAML and Registry swapped.** Option labels were applied **positionally**, from a key list written separately from the `<option>` markup. `filterCat`'s keys were ordered entity/automation/script/helper while the options are entity/helper/automation/script, so choosing 「自动化」 filtered `helper`; `filterYaml`'s two keys were swapped, so 「YAML」 displayed the Registry label. Both now match on the option's `value`, so the two lists can no longer drift apart. Twenty-five checks in `test_panel_sync.py` cover every filter select, and all eight re-injected defects turn them red.
+- 🕐 **Two timestamps were formatted with `toLocaleString('vi-VN')`** — upstream's source language — so a Chinese or English user saw upstream's date conventions regardless of what they had chosen. They follow the panel's own language now.
+
+### Added
+- 🤖 **Enabled and disabled automations can be told apart.** The scanner already knew: it appended a `reason_auto_disabled` reason. But that is a string, so the panel could not filter on it. `ScanResult.disabled` existed and was already in `to_dict()` and already populated for entities — automations were the only category that never filled it in, and the panel never read the field at all. Automations now record it from two independent sources (the entity registry, and the state machine, which is what covers YAML automations that have no registry entry), the results table has a fourth filter, and every automation row carries a ✅/⛔ badge. Other categories show the badge only when disabled, so a table of entities does not become a wall of "enabled".
+- 🔧 **`tools/test_filters.js`** — 12 checks that lift the **actual** filter predicate out of `panel.html` and run it, rather than re-implementing it. A rendered click test is not evidence here: the browser tool does not drive a `<select>`'s inline `onchange` reliably, and the pre-existing risk filter does not respond to it either, so anything that claimed to verify the filter by clicking would have been measuring the tool.
+
+### Not changed
+- **A disabled automation is a state fact, not a risk judgement.** It gets its own badge and its own filter; the risk level still only means "how long since it triggered / is the name suspicious". Raising the risk level would have changed the existing statistics and everyone's habits for no extra information.
+
+---
+
 ## [1.5.2] - 2026-10-02
 
 Two defects found by auditing the running integration against a live Home
