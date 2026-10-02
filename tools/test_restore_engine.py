@@ -101,11 +101,25 @@ class States:
         return object() if entity_id in self.present else None
 
 
+class Services:
+    def __init__(self):
+        self.called: list[tuple] = []
+        self.available = {"automation", "script"}
+
+    def has_service(self, domain, service):
+        return domain in self.available and service == "reload"
+
+    async def async_call(self, domain, service, blocking=False, data=None):
+        self.called.append((domain, service))
+        return None
+
+
 class Hass:
     def __init__(self):
         self.ent_reg = EntReg()
         self.config_entries = ConfigEntries()
         self.states = States()
+        self.services = Services()
 
 
 def make_engine():
@@ -187,25 +201,56 @@ check("an already-enabled entity still triggers a reload of its owner",
 check("and reports that a reload happened rather than claiming nothing to do",
       r2["success"] is True and r2.get("reloaded") is True)
 
-# ═══ 3. an entity with no owning config entry is not an error ══════════════
+# ═══ 3. an entity with no owning config entry falls back to the component ═══
+# Measured on the live instance: the registry row had no config_entry_id, the
+# engine reported that it had nothing to reload, and did nothing. Four
+# automations had been sitting unloaded for days, invisible in the UI, and every
+# one came back the moment `automation.reload` was issued.
+print("\nrestore: no owning config entry is not a dead end")
+
 h3 = Hass()
-h3.ent_reg.entries["sensor.yaml"] = RegEntry("sensor.yaml", disabled=True,
-                                             disabled_by=Disabler.USER, config_entry_id=None)
+h3.ent_reg.entries["automation.3333"] = RegEntry("automation.3333", disabled=True,
+                                                disabled_by=Disabler.USER, config_entry_id=None)
 eng3 = Engine(h3)
-r3 = asyncio.run(eng3.async_restore_entity("sensor.yaml"))
-check("a YAML entity restores without a reload and is not called a failure",
-      r3["success"] is True and r3["re_enabled"] is True and r3.get("reloaded") is False,
-      "there is nothing to reload; inventing a failure would be worse")
+r3 = asyncio.run(eng3.async_restore_entity("automation.3333"))
+check("an automation with no owning config entry reloads its component",
+      ("automation", "reload") in h3.services.called,
+      "this is the state a live instance was in: registry row with no owner, "
+      "definition alive, entity never re-instantiated")
+check("and reports the reload rather than claiming nothing to do",
+      r3["success"] is True and r3.get("reloaded") is True)
+check("the config-entry path is not taken when there is no entry",
+      h3.config_entries.reloaded == [])
+
+# a domain with no reload service is left alone rather than guessed at
+h3b = Hass()
+h3b.services = Services()
+h3b.ent_reg.entries["sensor.yaml"] = RegEntry("sensor.yaml", disabled=True,
+                                              disabled_by=Disabler.USER, config_entry_id=None)
+eng3b = Engine(h3b)
+r3b = asyncio.run(eng3b.async_restore_entity("sensor.yaml"))
+check("a YAML sensor without an owner is not failed",
+      r3b["success"] is True and r3b.get("reloaded") is False,
+      "the registry update is genuinely enough for it; inventing a failure "
+      "would be worse")
 check("and it still clears the disabled flag",
-      not h3.ent_reg.entries["sensor.yaml"].disabled)
+      not h3b.ent_reg.entries["sensor.yaml"].disabled)
+check("no component reload is invented for a domain that has none",
+      h3b.services.called == [])
+check("the set of reloadable domains is automation and script, and is written down",
+      "_RELOADABLE_DOMAINS = frozenset({\"automation\", \"script\"})"
+      in (COMPONENT / "purge_engine.py").read_text(encoding="utf-8"))
+
 
 # ═══ 4. failures are still failures ════════════════════════════════════════
 h4 = Hass()
+h4.services = Services()
 eng4 = Engine(h4)
 r4 = asyncio.run(eng4.async_restore_entity("sensor.gone"))
 check("an entity that is not in the registry fails", r4["success"] is False)
 
 h5 = Hass()
+h5.services = Services()
 h5.ent_reg.entries["sensor.keep"] = RegEntry("sensor.keep", disabled=True,
                                              disabled_by=Disabler.SYSTEM, config_entry_id="ce-k")
 eng5 = Engine(h5)
@@ -214,6 +259,7 @@ check("a SYSTEM-disabled entity is refused, not silently cleared",
       r5["success"] is False and h5.ent_reg.entries["sensor.keep"].disabled)
 
 h6 = Hass()
+h6.services = Services()
 h6.ent_reg.entries["sensor.reload"] = RegEntry("sensor.reload", disabled=True,
                                                disabled_by=Disabler.USER, config_entry_id="ce-r")
 h6.config_entries.fail_on.add("ce-r")
@@ -224,6 +270,7 @@ check("a failed reload does not lose the restore",
       "the registry edit did happen; a reload failure must not discard it")
 check("and it is reported rather than claimed as a clean success",
       r6.get("reloaded") is False)
+
 
 # ═══ 5. the source keeps the reload in the path ════════════════════════════
 print("\nrestore: the invariant is written down")
@@ -238,11 +285,19 @@ check("a claimed restore is confirmed against the state machine",
       "_entity_is_back" in init and "did not come back" in init,
       "the trash record is dropped on the word of this function, so a false "
       "'success' turns a failed restore into a real deletion")
-check("that check runs only when something claimed to be re-enabled",
-      'if result.get("re_enabled")' in init)
-check("the wait is bounded rather than a bare instant check",
-      "asyncio.sleep" in init and "timeout" in init,
-      "a restore that worked on a loaded instance must not be failed for lag")
+# The hole a user walked into: the check used to be guarded on re_enabled, so
+# the second press on the trash row - which takes the "already enabled" branch -
+# was never verified and dropped the record.
+ver = init.split("async def _verified_restore", 1)[1].split("async def _entity_is_back", 1)[0]
+check("the state machine is consulted for EVERY claimed success, not only re-enables",
+      'if result.get("success"):' in ver and 'if result.get("re_enabled")' not in ver,
+      "guarding this on re_enabled left the 'already enabled' branch "
+      "unverified - which is exactly what the second press on 恢复 hits")
+check("the two failure modes are told apart",
+      "no longer in the registry" in ver and "did not come back" in ver)
+check("the wait is bounded and skipped when no reload was issued",
+      "asyncio.sleep" in init and "timeout=3.0 if reloaded else 0.0" in init,
+      "a batch restore of many unloadable entities would otherwise stall")
 
 print()
 if FAILURES:

@@ -308,9 +308,22 @@ check("both restore paths go through the verification helper",
       f"found {init_src.count(_call_needle)}")
 helper = init_src[init_src.index("async def _verified_restore"):]
 helper = helper[:helper.index("\ndef ")]
-check("the helper re-checks the registry when there was nothing to restore",
-      'if result.get("success") and not result.get("re_enabled"):' in helper
-      and "async_get(entity_id) is None" in helper)
+# The registry re-check used to be guarded on `not re_enabled`, so the second
+# press on a trash row - which takes the "already enabled, nothing to do"
+# branch - skipped it entirely, reported success and dropped the record. The
+# check now covers every claimed success, and tells the two failure modes apart.
+check("the registry is re-checked for EVERY claimed success, not only one branch",
+      'if result.get("success"):' in helper
+      and 'if result.get("success") and not result.get("re_enabled"):' not in helper,
+      "guarding this on re_enabled left the 'already enabled' path unverified - "
+      "which is exactly what a second press on 恢复 hits")
+check("and it distinguishes a vanished entity from one that did not come back",
+      "in_registry" in helper and "if not in_registry:" in helper
+      and "no longer in the registry" in helper
+      and "did not come back" in helper,
+      "the two failures need different advice: one is a deletion, the other "
+      "is a reload - telling a user to restart when their entity was deleted "
+      "sends them the wrong way")
 check("a vanished entity is reported as a failure, not a success",
       '"success": False' in helper and "no longer in the registry" in helper)
 check("the reason is written down where it lives",

@@ -13,6 +13,11 @@ from .const import DOMAIN, SAFETY_DEVICE_CLASSES
 
 _LOGGER = logging.getLogger(__name__)
 
+# Domains whose entities can be brought back by reloading the component itself,
+# for the case where the registry row has no owning config entry. An automation
+# or script in that state is invisible in the UI until its component reloads.
+_RELOADABLE_DOMAINS = frozenset({"automation", "script"})
+
 
 class PurgeEngine:
     """Handles the actual deletion/disabling of entities."""
@@ -180,9 +185,10 @@ class PurgeEngine:
                 reloaded = await self._async_reload_owner(entity_id, entry)
                 if not reloaded:
                     _LOGGER.warning(
-                        "Re-enabled %s in the registry but no config entry could be "
-                        "reloaded; the entity may not come back until Home "
-                        "Assistant reloads it", entity_id,
+                        "Re-enabled %s in the registry but nothing could be reloaded "
+                        "to bring it back; the restore will be verified against the "
+                        "state machine and the trash record kept if it does not "
+                        "appear", entity_id,
                     )
                 _LOGGER.info("Restored entity: %s (config entry reloaded: %s)", entity_id, reloaded)
                 return {
@@ -206,25 +212,55 @@ class PurgeEngine:
             return {"success": False, "re_enabled": False, "error": str(exc)}
 
     async def _async_reload_owner(self, entity_id: str, reg_entry) -> bool:
-        """Re-set-up the config entry that owns this entity, so it comes back.
+        """Make the entity actually come back, and say whether it was tried.
 
-        Returns True when a reload was actually issued. An entity with no
-        owning config entry (a YAML entity, a helper) has nothing to reload -
-        for those the registry update is genuinely enough, and reporting a
-        failure would be inventing a problem.
+        Two shapes, both measured on a live instance:
+
+        * the registry row names a config entry - reload it, which is what
+          Home Assistant's own entity-registry screen does;
+        * it names none, and nothing else is re-instantiating the entity. The
+          definition is still there - four automations sat in exactly this
+          state for days, invisible in the UI, and every one of them came back
+          the moment `automation.reload` was issued. So the owning component is
+          reloaded instead.
+
+        Returns True when a reload was actually issued. An entity with neither
+        an owner nor a reloadable component is not an error: the registry edit
+        is genuinely enough for it, and `_verified_restore` confirms that
+        against the state machine rather than trusting this function.
         """
         entry_id = getattr(reg_entry, "config_entry_id", None)
-        if not entry_id:
-            return False
-        try:
-            await self.hass.config_entries.async_reload(entry_id)
-            _LOGGER.debug("Reloaded config entry %s to bring %s back", entry_id, entity_id)
-            return True
-        except Exception as exc:  # a failed reload must not lose the restore
-            _LOGGER.warning(
-                "Could not reload config entry %s for %s: %s", entry_id, entity_id, exc
-            )
-            return False
+        if entry_id:
+            try:
+                await self.hass.config_entries.async_reload(entry_id)
+                _LOGGER.debug("Reloaded config entry %s to bring %s back", entry_id, entity_id)
+                return True
+            except Exception as exc:  # a failed reload must not lose the restore
+                _LOGGER.warning(
+                    "Could not reload config entry %s for %s: %s", entry_id, entity_id, exc
+                )
+                return False
+
+        domain = entity_id.split(".")[0]
+        if domain in _RELOADABLE_DOMAINS and self.hass.services.has_service(domain, "reload"):
+            try:
+                await self.hass.services.async_call(domain, "reload", blocking=True)
+                _LOGGER.info(
+                    "Reloaded the %s component to bring %s back (its registry row "
+                    "has no owning config entry)", domain, entity_id,
+                )
+                return True
+            except Exception as exc:
+                _LOGGER.warning(
+                    "Could not reload the %s component for %s: %s", domain, entity_id, exc
+                )
+                return False
+
+        _LOGGER.debug(
+            "%s has no owning config entry and %s has no reload service; relying "
+            "on the registry update alone", entity_id, domain,
+        )
+        return False
 
     async def async_hard_delete_soft_deleted(self, entity_ids: list[str]) -> dict[str, Any]:
         """Permanently remove entities that have been soft-deleted."""
