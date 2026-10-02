@@ -1,7 +1,7 @@
 # 🧹 HA Optimizer
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-1.6.0-blue)
+![version](https://img.shields.io/badge/version-1.7.0-blue)
 ![HA](https://img.shields.io/badge/Home%20Assistant-2023.1+-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.11+-yellow)
@@ -382,6 +382,23 @@ The results table has a fourth filter for it, next to risk / type / source:
 Every automation row also carries a badge — ✅ 启用中 or ⛔ 已禁用 — so you can see the split without touching the filter. Rows in other categories show the badge only when they are disabled.
 
 A disabled automation is a **state fact, not a risk judgement**: it does not change its risk level. "Disabled" and "high risk" are different questions, and the panel keeps them separate.
+
+### 🗑️ The trash, and the two bulk buttons
+
+Every soft delete lands in the trash, where it stays disabled and reversible. The tab shows **how many are in there** and, for each one, **how long until it is removed automatically** — sorted soonest-first, because that is the row that will disappear on its own.
+
+| Button | What it does | Gate |
+|---|---|---|
+| ♻️ 一键恢复全部 | Re-enables everything in the trash and puts it back in the scan list | A plain confirm — nothing is destroyed |
+| 🗑️ 清空回收站 | **Permanently** removes everything in the trash | You must **type the number of entries** before the button arms |
+
+The asymmetry is the point. Restoring everything is the undo button for a purge that removed the wrong batch, so it should be one click away. Emptying the trash is the one bulk action here that cannot be undone and leaves no second copy, so one Enter key is not enough of a gate.
+
+**The automatic expiry stays on as a floor** — after `soft_delete_days` (default 30) an entry in the trash is removed even if you never touch it, with a warning log, a persistent notification and an event. The countdown column makes that visible instead of surprising. Set `soft_delete_days: 0` if you would rather empty it yourself.
+
+Anything a bulk operation *could not* really remove — a YAML-only automation, a safety device class — **stays in the trash** and is reported, rather than being reported as gone. A disabled entity nobody tracks is a ghost that nothing would ever restore or finish.
+
+The two actions are also available as `ha_optimizer.restore_all` and `ha_optimizer.empty_trash`.
 
 ---
 

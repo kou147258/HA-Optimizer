@@ -1,6 +1,6 @@
 """Constants for HA Optimizer."""
 DOMAIN = "ha_optimizer"
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 
 # Config keys
 CONF_SCAN_INTERVAL_DAYS = "scan_interval_days"
@@ -45,6 +45,8 @@ SOFT_DELETE_STORE_KEY = f"{DOMAIN}_soft_delete"
 SERVICE_SCAN = "scan"
 SERVICE_PURGE = "purge"
 SERVICE_RESTORE = "restore"
+SERVICE_RESTORE_ALL = "restore_all"
+SERVICE_EMPTY_TRASH = "empty_trash"
 SERVICE_GET_RESULTS = "get_results"
 
 # Events

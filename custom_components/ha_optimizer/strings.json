@@ -114,6 +114,14 @@
     "analyze_addons": {
       "name": "Analyze Add-ons",
       "description": "Queries the Supervisor API to return host resource usage (CPU, RAM, disk, OS) and the full add-on list with per-addon state, version, update status, and runtime stats."
+    },
+    "restore_all": {
+      "name": "Restore everything in the trash",
+      "description": "Re-enables every entity currently in the trash and returns them to the scan list. Nothing is destroyed, so this is safe to call — it is the undo for a purge that removed the wrong batch."
+    },
+    "empty_trash": {
+      "name": "Empty the trash",
+      "description": "PERMANENTLY removes every entity currently in the trash. This cannot be undone and there is no second copy. Anything that cannot really be removed stays in the trash and is reported."
     }
   }
 }

@@ -1237,20 +1237,27 @@
 
   <!-- SOFT DELETE TAB -->
   <div id="tabSoft" style="display:none">
-    <div class="toolbar">
-      <button class="btn btn-ghost" onclick="loadSoftDeleted()">🔄 <span data-i18n="btnReload">Reload</span></button>
+    <div class="toolbar" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px">
+      <div style="display:flex; gap:8px; align-items:center">
+        <button class="btn btn-ghost" onclick="loadSoftDeleted()">🔄 <span data-i18n="btnReload">Reload</span></button>
+        <button class="btn btn-ghost" onclick="restoreAllTrash()" id="btnRestoreAll">♻️ <span data-i18n="trashRestoreAll">Restore all</span></button>
+        <button class="btn btn-danger" onclick="emptyTrashFlow()" id="btnEmptyTrash">🗑️ <span data-i18n="trashEmpty">Empty trash</span></button>
+      </div>
+      <div style="font-size:0.8rem; color:var(--text-muted)" id="trashSummary"></div>
     </div>
+    <div id="trashEmptyState" style="display:none"></div>
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
             <th>Entity ID</th>
             <th data-i18n="thDisabledAt">Disabled At</th>
+            <th data-i18n="thExpiresIn">Auto-purge in</th>
             <th data-i18n="thAction">Action</th>
           </tr>
         </thead>
         <tbody id="softBody">
-          <tr><td colspan="3" style="text-align:center; color:var(--text-muted); padding:40px" data-i18n="emptyTrashMsg">No entities in trash yet</td></tr>
+          <tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:40px" data-i18n="emptyTrashMsg">No entities in trash yet</td></tr>
         </tbody>
       </table>
     </div>
@@ -2322,9 +2329,29 @@ function switchTab(name) {
   if (name === 'addon') loadAddonTab();
 }
 
+
+// Tracked separately from the DOM so the typed confirmation can state exactly
+// how many entries are about to be destroyed, even if the list was reloaded
+// between rendering and clicking.
+let _trashCount = 0;
+
+function _expiryLabel(daysLeft) {
+  if (daysLeft === null || daysLeft === undefined) return t('expiryUnknown');
+  if (daysLeft < 0) return t('expiryOverdue', { n: Math.abs(daysLeft) });
+  if (daysLeft === 0) return t('expiryToday');
+  return t('expiryIn', { n: daysLeft });
+}
+function _expiryColor(daysLeft) {
+  if (daysLeft === null || daysLeft === undefined) return 'var(--text-muted)';
+  if (daysLeft <= 2) return 'var(--danger)';
+  if (daysLeft <= 7) return 'var(--medium-risk)';
+  return 'var(--text-muted)';
+}
+
 async function loadSoftDeleted() {
   const body = document.getElementById('softBody');
-  body.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:20px; color:var(--text-muted)">${t('loading')}</td></tr>`;
+  const summary = document.getElementById('trashSummary');
+  body.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--text-muted)">' + t('loading') + '</td></tr>';
   try {
     const raw = await callService('ha_optimizer', 'get_results', {});
     const data = extractData(raw);
@@ -2332,33 +2359,153 @@ async function loadSoftDeleted() {
     let softDeleted = [];
     if (data && data.soft_deleted && typeof data.soft_deleted === 'object') {
       softDeleted = Object.entries(data.soft_deleted)
-        .map(([entity_id, meta]) => ({ entity_id, disabled_at: meta?.disabled_at || null }));
+        .map(([entity_id, meta]) => ({
+          entity_id: entity_id,
+          disabled_at: (meta && meta.disabled_at) || null,
+          days_left: (meta && typeof meta.days_left === 'number') ? meta.days_left : null,
+        }));
     }
+    // soonest to expire first: that is the row most likely to disappear on
+    // its own, so it should not be at the bottom of the list
+    softDeleted.sort((a, b) =>
+      ((a.days_left === null ? 1e9 : a.days_left) - (b.days_left === null ? 1e9 : b.days_left)));
+
+    _trashCount = softDeleted.length;
+    const sd = document.getElementById('statSoftDel');
+    if (sd) sd.textContent = softDeleted.length;
+    const ra = document.getElementById('btnRestoreAll');
+    const et = document.getElementById('btnEmptyTrash');
+    if (ra) ra.disabled = softDeleted.length === 0;
+    if (et) et.disabled = softDeleted.length === 0;
+    if (summary) summary.textContent = softDeleted.length ? t('trashSummary', { n: softDeleted.length }) : '';
 
     if (!softDeleted.length) {
-      body.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:40px; color:var(--text-muted)">${t('emptyTrash')}</td></tr>`;
-      const sd = document.getElementById('statSoftDel'); if(sd) sd.textContent = '0';
+      body.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:40px">' + t('emptyTrash') + '</td></tr>';
       return;
     }
 
-    const sd = document.getElementById('statSoftDel'); if(sd) sd.textContent = softDeleted.length;
-
-    body.innerHTML = softDeleted.map(item => `
-      <tr id="soft-row-${item.entity_id.replace('.','_')}">
-        <td class="entity-id">${item.entity_id}</td>
-        <td style="color:var(--text-muted)">${item.disabled_at ? new Date(item.disabled_at).toLocaleString() : '—'}</td>
-        <td>
-          <button class="btn btn-ghost" style="padding:5px 12px; font-size:0.8rem"
-            onclick="restoreEntity('${item.entity_id}', this)">${t('softRestoreBtn')}</button>
-          <button class="btn btn-danger" style="padding:5px 12px; font-size:0.8rem; margin-left:8px"
-            onclick="hardDeleteEntity('${item.entity_id}', this)">${t('softHardDelBtn')}</button>
-        </td>
-      </tr>
-    `).join('');
+    body.innerHTML = softDeleted.map(item => (
+      '<tr id="soft-row-' + item.entity_id.replace('.', '_') + '">' +
+        '<td class="entity-id">' + item.entity_id + '</td>' +
+        '<td style="color:var(--text-muted)">' +
+          (item.disabled_at ? new Date(item.disabled_at).toLocaleString(_panelLocale()) : '—') + '</td>' +
+        '<td style="color:' + _expiryColor(item.days_left) + '">' + _expiryLabel(item.days_left) + '</td>' +
+        '<td>' +
+          '<button class="btn btn-ghost" style="padding:5px 12px; font-size:0.8rem" ' +
+            'onclick="restoreEntity(&#39;' + item.entity_id + '&#39;, this)">' + t('softRestoreBtn') + '</button>' +
+          '<button class="btn btn-danger" style="padding:5px 12px; font-size:0.8rem; margin-left:8px" ' +
+            'onclick="hardDeleteEntity(&#39;' + item.entity_id + '&#39;, this)">' + t('softHardDelBtn') + '</button>' +
+        '</td>' +
+      '</tr>'
+    )).join('');
   } catch(e) {
-    body.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:20px; color:var(--danger)">❌ ${e.message}</td></tr>`;
+    body.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--danger)">❌ ' + e.message + '</td></tr>';
   }
 }
+
+/**
+ * Restore every entity in the trash. Nothing is destroyed here, so a plain
+ * confirm is the right gate: this is the undo for a purge that removed the
+ * wrong batch.
+ */
+async function restoreAllTrash() {
+  if (_trashCount === 0) { toast('info', t('emptyTrash')); return; }
+  if (!confirm(t('trashRestoreAllConfirm', { n: _trashCount }))) return;
+  const btn = document.getElementById('btnRestoreAll');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  try {
+    const raw = await callService('ha_optimizer', 'restore_all', {});
+    const r = extractData(raw) || {};
+    const restored = (r.restored || []).length;
+    const failed = Object.keys(r.failed || {}).length;
+    if (failed) toast('warning', t('trashRestoreAllDonePartial', { ok: restored, no: failed }));
+    else toast('success', t('trashRestoreAllDone', { n: restored }));
+    await loadSoftDeleted();
+    await _reloadScanList();
+  } catch(e) {
+    toast('error', '❌ ' + e.message);
+    if (btn) { btn.disabled = false; btn.innerHTML = '♻️ ' + t('trashRestoreAll'); }
+  }
+}
+
+// A restored entity is put back into the stored scan results by the backend,
+// so the scan list has to be re-read or it keeps showing the old set.
+async function _reloadScanList() {
+  try {
+    if (typeof loadResults === 'function') { await loadResults(); return; }
+    if (Array.isArray(allResults)) {
+      const fresh = extractData(await callService('ha_optimizer', 'get_results', {}));
+      if (fresh && Array.isArray(fresh.results)) displayResults(fresh.results);
+    }
+  } catch(e) { /* the trash view is what the user is looking at */ }
+}
+
+/**
+ * Emptying the trash is the one bulk action here that cannot be undone and
+ * leaves no second copy, so it does NOT get the single confirm() a single hard
+ * delete gets. The user has to type how many entries are in the trash.
+ */
+function emptyTrashFlow() {
+  if (_trashCount === 0) { toast('info', t('emptyTrash')); return; }
+  const panel = document.getElementById('trashEmptyState');
+  if (!panel) return;
+  panel.style.display = 'block';
+  panel.innerHTML =
+    '<div class="backup-notice" style="display:block; margin-bottom:12px">' +
+      '<div style="margin-bottom:10px">' + t('trashEmptyWarn', { n: _trashCount }) + '</div>' +
+      '<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">' +
+        '<input id="trashConfirmInput" type="text" inputmode="numeric" autocomplete="off" ' +
+          'style="flex:1; min-width:120px; padding:8px 10px; border-radius:6px; ' +
+                 'border:1px solid var(--danger); background:var(--surface2); color:var(--text)" ' +
+          'placeholder="' + t('trashEmptyTypeHere', { n: _trashCount }) + '">' +
+        '<button class="btn btn-danger" id="trashConfirmOk">' + t('trashEmptyConfirmBtn') + '</button>' +
+        '<button class="btn btn-ghost" onclick="cancelEmptyTrash()">' + t('cancel') + '</button>' +
+      '</div>' +
+      '<div id="trashConfirmHint" style="margin-top:8px; font-size:0.8rem; color:var(--text-muted)"></div>' +
+    '</div>';
+
+  const input = document.getElementById('trashConfirmInput');
+  const hint = document.getElementById('trashConfirmHint');
+  const ok = document.getElementById('trashConfirmOk');
+  if (input) input.focus();
+
+  const check = () => {
+    const typed = !!(input && input.value.trim() === String(_trashCount));
+    if (ok) ok.disabled = !typed;
+    if (hint) hint.textContent = typed ? t('trashEmptyReady') : t('trashEmptyHint');
+  };
+  if (input) input.addEventListener('input', check);
+  if (ok) {
+    ok.disabled = true;
+    ok.addEventListener('click', () => performEmptyTrash());
+  }
+  check();
+}
+
+function cancelEmptyTrash() {
+  const panel = document.getElementById('trashEmptyState');
+  if (panel) { panel.style.display = 'none'; panel.innerHTML = ''; }
+}
+
+async function performEmptyTrash() {
+  const btn = document.getElementById('trashConfirmOk');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  try {
+    const raw = await callService('ha_optimizer', 'empty_trash', {});
+    const r = extractData(raw) || {};
+    const removed = (r.removed || []).length;
+    const kept = Object.keys(r.kept || {}).length;
+    cancelEmptyTrash();
+    if (kept) toast('warning', t('trashEmptyDonePartial', { ok: removed, no: kept }));
+    else toast('success', t('trashEmptyDone', { n: removed }));
+    await loadSoftDeleted();
+    await _reloadScanList();
+  } catch(e) {
+    toast('error', '❌ ' + e.message);
+    cancelEmptyTrash();
+  }
+}
+
 
 async function restoreEntity(id, btn) {
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
@@ -3765,6 +3912,25 @@ const I18N = {
     scanningMsg: 'Scanning system, please wait...',
     btnReload: 'Reload',
     thDisabledAt: 'Disabled At',
+    thExpiresIn: 'Auto-purge in',
+    trashSummary: (p) => `${p.n} in the trash`,
+    trashRestoreAll: 'Restore all',
+    trashRestoreAllConfirm: (p) => `Re-enable all ${p.n} entities in the trash?\n\nNothing is deleted — this only undoes a soft delete.`,
+    trashRestoreAllDone: (p) => `♻️ Restored ${p.n} entities from the trash`,
+    trashRestoreAllDonePartial: (p) => `♻️ Restored ${p.ok}, but ${p.no} could not be re-enabled and stay in the trash`,
+    trashEmpty: 'Empty trash',
+    trashEmptyWarn: (p) => `⚠️ You are about to PERMANENTLY delete ${p.n} entities.\nThere is no undo and no second copy. Anything that cannot really be removed will stay in the trash and be reported.`,
+    trashEmptyTypeHere: (p) => `Type ${p.n} to confirm`,
+    trashEmptyConfirmBtn: 'Delete forever',
+    trashEmptyHint: 'Type the number above to enable the button.',
+    trashEmptyReady: '✓ Confirmed — the button is now live.',
+    trashEmptyDone: (p) => `🗑️ Permanently deleted ${p.n} entities`,
+    trashEmptyDonePartial: (p) => `🗑️ Deleted ${p.ok}, but ${p.no} could not be removed and stay in the trash`,
+    expiryIn: (p) => `${p.n} day(s)`,
+    expiryToday: 'today',
+    expiryOverdue: (p) => `${p.n} day(s) overdue`,
+    expiryUnknown: 'unknown',
+    cancel: 'Cancel',
     thAction: 'Action',
     emptyTrashMsg: 'No entities in trash yet',
     clickToStart: 'Click the analyze button to begin.',
@@ -4189,6 +4355,25 @@ const I18N = {
     scanningMsg: '正在扫描系统,请稍候...',
     btnReload: '重新加载',
     thDisabledAt: '禁用时间',
+    thExpiresIn: '自动清理倒计时',
+    trashSummary: (p) => `回收站里有 ${p.n} 个`,
+    trashRestoreAll: '一键恢复全部',
+    trashRestoreAllConfirm: (p) => `重新启用回收站里的全部 ${p.n} 个实体？\n\n不会删除任何东西——这只是撤销软删除。`,
+    trashRestoreAllDone: (p) => `♻️ 已从回收站恢复 ${p.n} 个实体`,
+    trashRestoreAllDonePartial: (p) => `♻️ 恢复了 ${p.ok} 个，但有 ${p.no} 个无法重新启用，仍留在回收站`,
+    trashEmpty: '清空回收站',
+    trashEmptyWarn: (p) => `⚠️ 你即将彻底删除 ${p.n} 个实体。\n不可撤销，也没有第二份副本。无法真正删除的实体会留在回收站并单独列出。`,
+    trashEmptyTypeHere: (p) => `输入 ${p.n} 以确认`,
+    trashEmptyConfirmBtn: '永久删除',
+    trashEmptyHint: '在上方输入数字后才能点按钮。',
+    trashEmptyReady: '✓ 已确认——按钮可以点了。',
+    trashEmptyDone: (p) => `🗑️ 已彻底删除 ${p.n} 个实体`,
+    trashEmptyDonePartial: (p) => `🗑️ 删除了 ${p.ok} 个，但有 ${p.no} 个无法删除，仍留在回收站`,
+    expiryIn: (p) => `还有 ${p.n} 天`,
+    expiryToday: '今天到期',
+    expiryOverdue: (p) => `已超期 ${p.n} 天`,
+    expiryUnknown: '未知',
+    cancel: '取消',
     thAction: '操作',
     emptyTrashMsg: '回收站里还没有实体',
     clickToStart: '点击分析按钮开始。',

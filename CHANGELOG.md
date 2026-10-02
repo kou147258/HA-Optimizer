@@ -7,6 +7,25 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ---
 
+## [1.7.0] - 2026-10-02
+
+The trash becomes something you drive. Two bulk operations, a countdown on
+every entry, and a bug that made "restore" a half-measure.
+
+### Fixed
+- ♻️ **Restoring an entity left it invisible in this panel.** The scan entry was dropped the moment an entity was soft-deleted, and `handle_restore` only removed the trash record — nothing was put back. The entity came back to life in Home Assistant and then vanished from the results until the next scan, up to `scan_interval_days` away. Reading it as "I restored it and the tool lost track of it". The scan entry is now snapshotted when an entity enters the trash and restored on the way out, and the panel re-reads the list after a restore.
+
+### Added
+- ♻️ **`ha_optimizer.restore_all` and a one-click Restore all button.** Nothing is destroyed, so it is a plain confirm — this is the undo for a purge that removed the wrong batch. It returns per-entity outcomes, and anything it could not re-enable stays in the trash with the reason.
+- 🗑️ **`ha_optimizer.empty_trash` and an Empty trash button.** Permanent, no second copy, so it is deliberately *not* a single `confirm()` the way a one-at-a-time hard delete is: you have to type the number of entries in the trash before the button arms. Anything the engine could not actually remove stays in the trash and is reported — the same rule that keeps a failed bulk delete from leaving a disabled, untracked ghost.
+- ⏳ **A countdown on every trash entry.** `get_results` now carries `expires_at` and `days_left` per entry, so the panel can show 「已超期 2 天」 / 「还有 5 天」 in the right colour and sort soonest-first, instead of asking you to remember what `soft_delete_days` is set to.
+- 🔧 **`tools/test_trash_bulk.py`** — 42 checks, no Home Assistant required. They cover the snapshot/restore round trip, the ordering in `handle_restore` (restore **before** dropping the trash record, or the snapshot is already gone), keeping what a bulk operation could not finish, the batching, and the typed confirmation. Wired into the `i18n` CI job.
+
+### Not changed
+- **The automatic expiry stays.** It is a floor, not a substitute: it is what stops the trash growing forever when you forget about it, and it already announces itself with a warning log, a persistent notification and an event. The new countdown makes it visible instead of surprising, and `soft_delete_days: 0` turns it off if you would rather empty the trash yourself.
+
+---
+
 ## [1.6.0] - 2026-10-02
 
 The config flow is finally translated, automations can be sorted by whether

@@ -43,11 +43,54 @@ class PurgeStore:
         return self._scan_data
 
     async def async_add_soft_deleted(self, entity_ids: list[str]):
-        """Record entities as soft-deleted with timestamp."""
+        """Record entities as soft-deleted with timestamp.
+
+        The scan entry is snapshotted alongside the timestamp. It used to be
+        dropped the moment an entity was soft-deleted, which meant a restore
+        put nothing back: the entity came back to life in Home Assistant and
+        then vanished from this panel until the next scan - which is up to
+        `scan_interval_days` away, and reads to the user as "I restored it and
+        the tool lost track of it".
+
+        An entity that is not in the stored scan results (already purged once,
+        or added to the trash from outside a purge) simply gets no snapshot,
+        and restoring it is still a success - there is nothing to put back.
+        """
         now_iso = dt_util.utcnow().isoformat()
+        index = {
+            r.get("entity_id"): r
+            for r in (self._scan_data.get("results") or [])
+            if isinstance(r, dict)
+        }
         for eid in entity_ids:
-            self._soft_data[eid] = {"disabled_at": now_iso}
+            entry: dict[str, Any] = {"disabled_at": now_iso}
+            snapshot = index.get(eid)
+            if snapshot is not None:
+                entry["scan_entry"] = snapshot
+            self._soft_data[eid] = entry
         await self._soft_store.async_save(self._soft_data)
+
+    async def async_restore_scan_entries(self, entity_ids: list[str]):
+        """Put snapshotted scan entries back after a restore.
+
+        Must be called BEFORE `async_remove_soft_deleted`, which is what
+        discards the snapshots.
+        """
+        results = self._scan_data.setdefault("results", [])
+        present = {r.get("entity_id") for r in results if isinstance(r, dict)}
+        added: list[str] = []
+        for eid in entity_ids:
+            meta = self._soft_data.get(eid) or {}
+            snapshot = meta.get("scan_entry")
+            if not isinstance(snapshot, dict) or eid in present:
+                continue
+            results.append(snapshot)
+            present.add(eid)
+            added.append(eid)
+        if added:
+            _LOGGER.debug("Restored %d scan result entries from the trash", len(added))
+            await self._scan_store.async_save(self._scan_data)
+        return added
 
     async def async_remove_soft_deleted(self, entity_ids: list[str]):
         """Remove entities from soft-delete tracking (restored or hard-deleted)."""

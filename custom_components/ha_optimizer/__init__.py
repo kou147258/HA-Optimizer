@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +30,8 @@ from .const import (
     SERVICE_GET_RESULTS,
     SERVICE_PURGE,
     SERVICE_RESTORE,
+    SERVICE_RESTORE_ALL,
+    SERVICE_EMPTY_TRASH,
     SERVICE_SCAN,
     SERVICE_ANALYZE_FINGERPRINT,
     SERVICE_COLLECT_BASELINE,
@@ -49,6 +51,12 @@ SERVICE_ANALYZE_ADDONS = "analyze_addons"
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = []
+
+# Registry writes are cheap individually but not in bulk. Restoring or
+# emptying a trash with hundreds of entries in one pass blocks the event loop
+# long enough for HA to complain, so both walk the trash in slices and yield
+# between them.
+_BULK_BATCH = 20
 
 
 # ================================================================
@@ -221,7 +229,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         pass
 
     # Remove services
-    for svc in [SERVICE_SCAN, SERVICE_PURGE, SERVICE_RESTORE, SERVICE_GET_RESULTS,
+    for svc in [SERVICE_SCAN, SERVICE_PURGE, SERVICE_RESTORE, SERVICE_RESTORE_ALL,
+                 SERVICE_EMPTY_TRASH, SERVICE_GET_RESULTS,
                 SERVICE_ANALYZE_RECORDER, SERVICE_ANALYZE_DASHBOARD,
                 SERVICE_ANALYZE_STORMS, SERVICE_ANALYZE_DEAD_CODE, SERVICE_ANALYZE_HEALTH,
                 SERVICE_ANALYZE_ADDONS,
@@ -293,6 +302,10 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
         data = hass.data[DOMAIN][entry.entry_id]
         result = await data["engine"].async_restore_entity(entity_id)
         if result.get("success"):
+            # Put the entity back in the scan list BEFORE dropping the trash
+            # record - the snapshot it needs lives in that record. Without
+            # this the entity came back to HA but stayed invisible here.
+            await data["store"].async_restore_scan_entries([entity_id])
             await data["store"].async_remove_soft_deleted([entity_id])
         return {
             "success": result.get("success", False),
@@ -301,14 +314,141 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
             "error": result.get("error"),
         }
 
+    async def handle_restore_all(call: ServiceCall):
+        """Restore every entity in the trash.
+
+        Nothing is destroyed here, so this is deliberately not a dangerous
+        operation - it is the panic button for "I purged the wrong batch".
+        Entities that cannot be re-enabled stay in the trash: they are still
+        disabled, and a disabled entity nobody tracks is a ghost.
+        """
+        data = hass.data[DOMAIN][entry.entry_id]
+        trash = await data["store"].async_get_soft_deleted()
+        restored: list[str] = []
+        failed: dict[str, str] = {}
+
+        for eid in list(trash):
+            result = await data["engine"].async_restore_entity(eid)
+            if result.get("success"):
+                restored.append(eid)
+            else:
+                failed[eid] = result.get("error") or "restore failed"
+            # yield so a large trash cannot monopolise the event loop
+            await asyncio.sleep(0)
+
+        if restored:
+            await data["store"].async_restore_scan_entries(restored)
+            await data["store"].async_remove_soft_deleted(restored)
+
+        _LOGGER.info(
+            "Restore-all: %d restored, %d still in the trash", len(restored), len(failed)
+        )
+        return {
+            "success": not failed,
+            "restored": restored,
+            "failed": failed,
+            "total": len(trash),
+        }
+
+    async def handle_empty_trash(call: ServiceCall):
+        """Permanently remove every entity in the trash. Irreversible.
+
+        Two things make this different from a single purge and both were
+        learned the hard way on the delete path:
+
+        * it is batched, because removing several hundred registry entries in
+          one pass blocks the event loop;
+        * anything the engine could not actually remove stays in the trash. A
+          hard delete that merely disabled the entity has not freed anything,
+          and dropping it from the records would leave it disabled and
+          untracked - nothing would ever restore or finish it.
+        """
+        data = hass.data[DOMAIN][entry.entry_id]
+        trash = await data["store"].async_get_soft_deleted()
+        ids = list(trash)
+        if not ids:
+            return {"success": True, "removed": [], "kept": [], "total": 0}
+
+        removed: list[str] = []
+        kept: dict[str, str] = {}
+        for start in range(0, len(ids), _BULK_BATCH):
+            batch = ids[start:start + _BULK_BATCH]
+            result = await data["engine"].async_hard_delete_soft_deleted(batch)
+            gone = set(result.get("success", [])) | set(result.get("soft_deleted", []))
+            only_disabled = set(result.get("disabled_only", []))
+            removed.extend(e for e in batch if e in gone)
+            for eid in batch:
+                if eid in gone:
+                    continue
+                if eid in only_disabled:
+                    kept[eid] = "delete failed, entity only disabled - still tracked"
+                else:
+                    reason = next(
+                        (f.get("error") for f in result.get("failed", []) if f.get("entity_id") == eid),
+                        None,
+                    )
+                    if not reason and any(
+                        y.get("entity_id") == eid for y in result.get("yaml_manual", [])
+                    ):
+                        reason = "defined in YAML - remove it by hand"
+                    elif not reason and any(
+                        s.get("entity_id") == eid for s in result.get("skipped_high_risk", [])
+                    ):
+                        reason = "safety device class - never removed automatically"
+                    kept[eid] = reason or "not removed"
+            await asyncio.sleep(0)
+
+        if removed:
+            await data["store"].async_remove_soft_deleted(removed)
+            await data["store"].async_remove_from_scan_results(removed)
+
+        if kept:
+            _LOGGER.warning(
+                "Empty-trash left %d entr(ies) in the trash because they were not "
+                "actually removed: %s", len(kept), kept,
+            )
+        else:
+            _LOGGER.warning("Empty-trash permanently removed %d entity/entities", len(removed))
+
+        hass.bus.async_fire(EVENT_PURGE_COMPLETE, {
+            "total": len(ids),
+            "removed": removed,
+            "kept": list(kept),
+        })
+        return {
+            "success": not kept,
+            "removed": removed,
+            "kept": kept,
+            "total": len(ids),
+        }
+
     async def handle_get_results(call: ServiceCall):
-        """Return last scan results plus soft-deleted tracking data."""
+        """Return last scan results plus soft-deleted tracking data.
+
+        Each trash entry also carries when it will be auto-purged, so the
+        panel can show the countdown instead of asking the user to remember
+        what `soft_delete_days` is set to.
+        """
         data = hass.data[DOMAIN][entry.entry_id]
         scan = await data["store"].async_get_scan_results()
         soft = await data["store"].async_get_soft_deleted()
+        days = entry.options.get(CONF_SOFT_DELETE_DAYS, DEFAULT_SOFT_DELETE_DAYS)
+        now = dt_util.utcnow()
+        for meta in soft.values():
+            try:
+                disabled_at = datetime.fromisoformat(meta["disabled_at"])
+                if disabled_at.tzinfo is None:
+                    disabled_at = disabled_at.replace(tzinfo=now.tzinfo)
+                expires = disabled_at + timedelta(days=days)
+                meta["expires_at"] = expires.isoformat()
+                meta["days_left"] = (expires - now).days
+            except (KeyError, ValueError, TypeError):
+                meta["expires_at"] = None
+                meta["days_left"] = None
         return {
             **scan,
             "soft_deleted": soft,
+            "soft_delete_days": days,
         }
 
     async def handle_analyze_recorder(call: ServiceCall):
@@ -635,6 +775,19 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
         schema=vol.Schema({
             vol.Required("entity_id"): cv.entity_id,
         }),
+    )
+    # Bulk trash operations. restore_all is the undo button for a purge that
+    # went wrong; empty_trash is irreversible and the panel gates it behind a
+    # typed confirmation rather than a single click.
+    hass.services.async_register(
+        DOMAIN, SERVICE_RESTORE_ALL, handle_restore_all,
+        schema=vol.Schema({}),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_EMPTY_TRASH, handle_empty_trash,
+        schema=vol.Schema({}),
+        supports_response=SupportsResponse.OPTIONAL,
     )
     try:
         from homeassistant.core import SupportsResponse

@@ -227,8 +227,19 @@ check("the analysis services are still registered at all",
                     "ADDONS", "FINGERPRINT")))
 
 registrations = source.count("supports_response=SupportsResponse.OPTIONAL")
-check("all 10 read-only services declare OPTIONAL", registrations == 10,
-      f"found {registrations}, expected 10")
+# Not a magic number: the two bulk trash services added later also declare
+# OPTIONAL, so the count grows with the service surface. What has to hold is
+# that every service the panel asks for a response from is registered that
+# way - a hardcoded "10" went stale the moment restore_all and empty_trash
+# landed.
+panel_src = (COMPONENT / "panel.html").read_text(encoding="utf-8")
+m = re.search(r"SERVICES_WITH_RESPONSE\s*=\s*new Set\(\[([^\]]*)\]\)", panel_src)
+with_response = set(re.findall(r"'([a-z_]+)'", m.group(1))) if m else set()
+check("every service the panel asks a response from is registered OPTIONAL",
+      with_response and registrations >= len(with_response),
+      f"{registrations} OPTIONAL registrations vs {len(with_response)} in the panel")
+check("no service is registered without declaring a response mode",
+      "async_register(" in source and "supports_response" in source)
 
 # The reason ONLY was wrong has to stay written down, or somebody will
 # "tighten" it back.

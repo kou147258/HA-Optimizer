@@ -35,6 +35,9 @@ jobs:
       - name: Filter behaviour tests
         run: node tools/test_filters.js
 
+      - name: Trash bulk-operation regression tests
+        run: python3 tools/test_trash_bulk.py
+
   # ── HACS Validation ──────────────────────────────────────────────────────────
   hacs-validate:
     name: HACS Validation

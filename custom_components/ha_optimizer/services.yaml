@@ -49,8 +49,27 @@ get_results:
   name: Get last scan results
   description: >
     Returns the last scan results as a service response, including the
-    current trash (soft-deleted entities). Use in automations or scripts
+    current trash (soft-deleted entities) and when each one is due for
+    automatic removal. Use in automations or scripts
     to process results programmatically.
+  fields: {}
+
+restore_all:
+  name: Restore everything in the trash
+  description: >
+    Re-enables every entity currently in the trash and returns them to the
+    scan list. Nothing is destroyed, so this is safe to call - it is the undo
+    for a purge that removed the wrong batch. Entities that cannot be
+    re-enabled stay in the trash and are reported in the response.
+  fields: {}
+
+empty_trash:
+  name: Empty the trash
+  description: >
+    PERMANENTLY removes every entity currently in the trash. This cannot be
+    undone and there is no second copy. Anything the engine could not really
+    remove stays in the trash and is reported in the response rather than
+    silently dropped.
   fields: {}
 
 analyze_recorder:
