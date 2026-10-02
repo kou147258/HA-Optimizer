@@ -4,8 +4,10 @@
 Guards the translation dictionary in panel.html against the drift that is easy
 to introduce and hard to notice: a key added to `en` but not to the other 12
 languages, a `{placeholder}` that only some languages carry, an HTML tag dropped
-in translation, a backend-emitted key that no dictionary defines, or a
-`t('key')` call site pointing at a key that does not exist.
+in translation, a key repeated inside a block (JS silently keeps the last one, so
+a copy-pasted foreign block can override good translations), a backend-emitted
+key that no dictionary defines, or a `t('key')` call site pointing at a key that
+does not exist.
 
 Dependency-free on purpose: this runs in CI before HACS/hassfest, which have
 their own jobs. Usage:
@@ -90,8 +92,11 @@ def _unquote(raw: str) -> str:
     )
 
 
-def parse_i18n(text: str) -> dict[str, dict[str, str]]:
-    """Return {lang: {key: value}} from the `const I18N = {...};` literal."""
+def parse_i18n(text: str, dupes: dict | None = None) -> dict[str, dict[str, str]]:
+    """Return {lang: {key: value}} from the `const I18N = {...};` literal.
+
+    If `dupes` is given, it is filled with {lang: [duplicated keys]}.
+    """
     marker = "const I18N = {"
     idx = text.find(marker)
     if idx == -1:
@@ -121,12 +126,18 @@ def parse_i18n(text: str) -> dict[str, dict[str, str]]:
         close = _match_brace(body, j)
         if close == -1:
             raise ParseError(f"unterminated language block: {lang}")
-        result[lang] = _parse_entries(body[j + 1 : close])
+        lang_dupes: list[str] = []
+        result[lang] = _parse_entries(body[j + 1 : close], lang_dupes)
+        if lang_dupes and dupes is not None:
+            dupes[lang] = lang_dupes
         i = close + 1
     return result
 
 
-def _parse_entries(body: str) -> dict[str, str]:
+def _parse_entries(body: str, dupes: list | None = None) -> dict[str, str]:
+    """Parse one language block. A key repeated inside the block is recorded in
+    `dupes` if provided — in a JS object literal the LAST definition silently
+    wins, so a stray copy-pasted block is invisible to a parity check."""
     entries: dict[str, str] = {}
     i = 0
     n = len(body)
@@ -164,6 +175,8 @@ def _parse_entries(body: str) -> dict[str, str]:
             continue
         if c == "," and depth == 0:
             if key is not None:
+                if key in entries and dupes is not None:
+                    dupes.append(key)
                 entries[key] = "".join(buf)
             key, buf, at_depth_zero = None, [], True
             i += 1
@@ -179,6 +192,8 @@ def _parse_entries(body: str) -> dict[str, str]:
             buf.append(c)
         i += 1
     if key is not None:
+        if key in entries and dupes is not None:
+            dupes.append(key)
         entries[key] = "".join(buf)
     return {k: _normalise(v) for k, v in entries.items()}
 
@@ -235,8 +250,9 @@ def main() -> int:
         print(f"FATAL: panel.html is not valid UTF-8: {exc}", file=sys.stderr)
         return 2
 
+    dupes: dict[str, list[str]] = {}
     try:
-        i18n = parse_i18n(panel)
+        i18n = parse_i18n(panel, dupes)
     except ParseError as exc:
         print(f"FATAL: {exc}", file=sys.stderr)
         return 2
@@ -254,6 +270,13 @@ def main() -> int:
 
     def tags(v: str) -> list[str]:
         return sorted(TAG.findall(v))
+
+    for lang in sorted(dupes):
+        d = sorted(set(dupes[lang]))
+        problems.append(
+            f"[{lang}] {len(d)} DUPLICATED key(s) — the last definition silently wins: "
+            + ", ".join(d[:8]) + (" ..." if len(d) > 8 else "")
+        )
 
     for lang in sorted(langs):
         d = i18n[lang]
