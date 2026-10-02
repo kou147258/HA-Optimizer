@@ -7,6 +7,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ---
 
+### Fixed — release packaging
+The asset that HACS installs had been assembled from a hardcoded list of eleven
+filenames, so **`translations/` was never in any published package** — the
+Chinese config-flow strings added in 1.7.0 never reached an install. The package
+is now built from the whole component directory, taken from the **git object
+store** rather than the working copy (the worktree is CRLF under
+`core.autocrlf`, the objects are LF, so a worktree build ships a `panel.html`
+that differs byte-for-byte from the one on GitHub). Verified by expanding the
+downloaded release: 12 files, every one byte-identical to its object.
+
 ## [1.7.2] - 2026-10-03
 
 **The delete button was never reporting anything, and it looked like the delete
