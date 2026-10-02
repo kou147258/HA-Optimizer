@@ -7,6 +7,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ---
 
+## [Unreleased]
+
+### Added
+- 🇨🇳 **简体中文 (zh-CN)** — full translation of all 380 UI keys, added as the 13th interface language. Covers every label, button, message, placeholder, theme description, card-type description and fingerprint metric, including the 25 parameterised (`(n) => ...`) entries.
+
+---
+
 ## [1.0.0] - 2025-04-19
 
 ### Added

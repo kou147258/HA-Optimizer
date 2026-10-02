@@ -5,7 +5,7 @@
 ![HA](https://img.shields.io/badge/Home%20Assistant-2023.1+-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.11+-yellow)
-![languages](https://img.shields.io/badge/UI-12%20ngôn%20ngữ-blueviolet)
+![languages](https://img.shields.io/badge/UI-13%20ngôn%20ngữ-blueviolet)
 ![themes](https://img.shields.io/badge/themes-11%20built--in-ff69b4)
 
 > 🇬🇧 **English version:** [README.md](README.md)
@@ -132,10 +132,10 @@ So sánh hành vi HA hôm nay **với chính lịch sử baseline của bạn** 
 | 🧊 Arctic | Trắng băng — chế độ sáng |
 | 🧛 Dracula | Classic Dracula tối + tím nhạt |
 
-### 🌍 12 Ngôn Ngữ Giao Diện *(tính năng mới)*
-Toàn bộ panel — mọi nhãn, nút, thông báo và lỗi — đều được dịch đầy đủ sang 12 ngôn ngữ. Chuyển đổi tức thì từ thanh chọn ngôn ngữ trên topbar; lựa chọn của bạn được lưu qua các phiên làm việc.
+### 🌍 13 Ngôn Ngữ Giao Diện *(tính năng mới)*
+Toàn bộ panel — mọi nhãn, nút, thông báo và lỗi — đều được dịch đầy đủ sang 13 ngôn ngữ. Chuyển đổi tức thì từ thanh chọn ngôn ngữ trên topbar; lựa chọn của bạn được lưu qua các phiên làm việc.
 
-**Hỗ trợ:** 🇻🇳 Tiếng Việt · 🇬🇧 English · 🇩🇪 Deutsch · 🇫🇷 Français · 🇳🇱 Nederlands · 🇵🇱 Polski · 🇸🇪 Svenska · 🇭🇺 Magyar · 🇨🇿 Čeština · 🇮🇹 Italiano · 🇵🇹 Português · 🇸🇮 Slovenščina
+**Hỗ trợ:** 🇻🇳 Tiếng Việt · 🇬🇧 English · 🇨🇳 简体中文 · 🇩🇪 Deutsch · 🇫🇷 Français · 🇳🇱 Nederlands · 🇵🇱 Polski · 🇸🇪 Svenska · 🇭🇺 Magyar · 🇨🇿 Čeština · 🇮🇹 Italiano · 🇵🇹 Português · 🇸🇮 Slovenščina
 
 ---
 ## 🛠️ Cài Đặt
@@ -390,7 +390,7 @@ automation:
 - 🧩 Quản lý add-on với CPU/RAM trực tiếp mỗi add-on (tự làm mới 5 giây)
 - 🖥️ Biểu đồ tài nguyên realtime (CPU / RAM / Disk) — luôn hiển thị
 - 🎨 11 theme tích hợp, lưu tự động
-- 🌍 12 ngôn ngữ giao diện, dịch đầy đủ
+- 🌍 13 ngôn ngữ giao diện, dịch đầy đủ
 - ⚙️ Config flow UI đầy đủ với options
 - 🔐 **Không cần Long-Lived Access Token** — xác thực qua WebSocket session của HA
 

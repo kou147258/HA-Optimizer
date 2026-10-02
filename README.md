@@ -5,7 +5,7 @@
 ![HA](https://img.shields.io/badge/Home%20Assistant-2023.1+-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.11+-yellow)
-![languages](https://img.shields.io/badge/UI-12%20languages-blueviolet)
+![languages](https://img.shields.io/badge/UI-13%20languages-blueviolet)
 ![themes](https://img.shields.io/badge/themes-11%20built--in-ff69b4)
 
 > 🇻🇳 **Phiên bản tiếng Việt:** [README_vi.md](README_vi.md)
@@ -132,10 +132,10 @@ Switch the entire panel's look with one click — your preference is saved autom
 | 🧊 Arctic | Icy white — bright mode |
 | 🧛 Dracula | Classic Dracula dark + soft purple |
 
-### 🌍 12 Interface Languages *(new)*
-The entire panel UI — every label, button, message, and error — is fully translated into 12 languages. Switch instantly from the language selector in the top bar; your choice persists across sessions.
+### 🌍 13 Interface Languages *(new)*
+The entire panel UI — every label, button, message, and error — is fully translated into 13 languages. Switch instantly from the language selector in the top bar; your choice persists across sessions.
 
-**Supported:** 🇻🇳 Tiếng Việt · 🇬🇧 English · 🇩🇪 Deutsch · 🇫🇷 Français · 🇳🇱 Nederlands · 🇵🇱 Polski · 🇸🇪 Svenska · 🇭🇺 Magyar · 🇨🇿 Čeština · 🇮🇹 Italiano · 🇵🇹 Português · 🇸🇮 Slovenščina
+**Supported:** 🇻🇳 Tiếng Việt · 🇬🇧 English · 🇨🇳 简体中文 · 🇩🇪 Deutsch · 🇫🇷 Français · 🇳🇱 Nederlands · 🇵🇱 Polski · 🇸🇪 Svenska · 🇭🇺 Magyar · 🇨🇿 Čeština · 🇮🇹 Italiano · 🇵🇹 Português · 🇸🇮 Slovenščina
 
 ---
 
@@ -391,7 +391,7 @@ automation:
 - 🧩 Add-on manager with live CPU/RAM per add-on (5s auto-refresh)
 - 🖥️ Real-time system gauges (CPU / RAM / Disk) — always visible
 - 🎨 11 built-in themes, saved per session
-- 🌍 12 UI languages, fully translated
+- 🌍 13 UI languages, fully translated
 - ⚙️ Full UI config flow with options
 - 🔐 **No Long-Lived Access Token required** — panel authenticates via HA WebSocket session
 
