@@ -397,6 +397,39 @@ check("the countdown sorts soonest-first",
 check("both bulk buttons exist in the markup",
       'id="btnRestoreAll"' in panel and 'id="btnEmptyTrash"' in panel)
 
+# The row actions were two inline-styled buttons separated by a margin-left.
+# They lined up only while the column was wide enough; the moment it wrapped
+# they stacked into a ragged staircase, and an early fix that used
+# `min-width: 0` made it worse - on a narrow window the destructive button
+# collapsed to just its icon. Green assertions, broken render.
+check("the two row actions live in one container rather than loose in the cell",
+      'class="trash-actions"' in panel and 'class="trash-actions-cell"' in panel)
+# Scoped to the row template: several other buttons in the panel legitimately
+# carry inline padding, so a panel-wide search would report those instead.
+row_tpl = panel[panel.index("soft-row-") - 400: panel.index("soft-row-") + 1600] \
+    if "soft-row-" in panel else ""
+check("neither row button carries an inline width or a margin between them",
+      "margin-left" not in row_tpl
+      and not re.search(r'<button class="btn btn-(?:ghost|danger)"\s*\+', row_tpl + '"', re.S)
+      and not re.search(r"<button class=\"btn btn-(?:ghost|danger)\"[^>]*style=", row_tpl),
+      "inline styles on a pair of buttons are what made them drift apart")
+check("the pair is laid out as two equal tracks, not flexible ones",
+      "grid-template-columns: repeat(2, minmax(" in panel
+      and re.search(r"#tabSoft \.trash-actions \.btn \{[^}]*flex: 1 1 0", panel) is None,
+      "flex with min-width:0 lets a button shrink below its own content")
+check("the buttons cannot collapse below their own label",
+      re.search(r"#tabSoft \.trash-actions \.btn \{[^}]*min-width: 0", panel) is None)
+check("the trash table is given room and scrolls rather than squeezing the controls",
+      "min-width: 620px" in panel
+      and re.search(r"#tabSoft \.table-wrap \{[^}]*overflow-x: auto", panel) is not None)
+check("trash cells do not wrap, so the rows stay one line tall",
+      re.search(r"#tabSoft td, #tabSoft th \{[^}]*white-space: nowrap", panel) is not None)
+check("the destructive row action is an outline, not a solid red block",
+      re.search(r"#tabSoft \.trash-actions \.btn-danger \{[^}]*background: transparent", panel) is not None,
+      "it is the one people tap by accident; the confirmation dialog is still the real guard")
+check("both row handlers are still wired",
+      "restoreEntity(" in panel and "hardDeleteEntity(" in panel)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} check(s) FAILED:")

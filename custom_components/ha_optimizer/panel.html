@@ -820,8 +820,55 @@
 
     /* Soft delete tab table */
     #tabSoft .table-wrap { overflow-x: auto; }
-    #tabSoft table { min-width: 380px; }
-    #tabSoft td, #tabSoft th { padding: 8px 10px; font-size: 0.8rem; }
+    #tabSoft table { min-width: 620px; }
+    #tabSoft td, #tabSoft th { padding: 8px 10px; font-size: 0.8rem; white-space: nowrap; }
+    /* The two actions in the trash rows.
+       They were two inline-styled buttons with a margin-left between them,
+       which only lined up while the column was wide enough to hold them side
+       by side. The moment it wrapped they stacked into a ragged staircase -
+       different widths, the second one indented by that leftover margin.
+
+       Two equal tracks rather than two flexible ones: `minmax(x, 1fr)` keeps
+       them the same width whatever the labels are, and `1fr` lets a long
+       translation grow them together. An earlier flex version with
+       `min-width: 0` let the buttons shrink below their own content, and on
+       a narrow window 彻底删除 collapsed to just its icon - green markup
+       assertions, broken render. The table below has a min-width for the
+       same reason: give the row room and let .table-wrap scroll it, rather
+       than squeezing the controls. */
+    #tabSoft .trash-actions-cell { white-space: nowrap; }
+    #tabSoft .trash-actions {
+      display: inline-grid;
+      grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
+      gap: 6px;
+    }
+    #tabSoft .trash-actions .btn {
+      padding: 5px 10px;
+      font-size: 0.78rem;
+      line-height: 1.3;
+      border-radius: 7px;
+      white-space: nowrap;
+      justify-content: center;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    /* The destructive one is the one people tap by accident. A bordered
+       outline keeps the row scannable and the existing confirmation dialog
+       is still the real guard. */
+    #tabSoft .trash-actions .btn-danger {
+      background: transparent;
+      color: var(--danger);
+      border: 1px solid var(--danger);
+    }
+    #tabSoft .trash-actions .btn-danger:hover {
+      background: var(--danger);
+      color: #fff;
+    }
+    #tabSoft .trash-actions .btn-ghost:hover {
+      background: var(--surface);
+      border-color: var(--text-muted);
+    }
 
     /* Dashboard stat grid on mobile */
     #tabDashboard .stat-card table { min-width: 0; width: 100%; }
@@ -2428,11 +2475,13 @@ async function loadSoftDeleted() {
         '<td style="color:var(--text-muted)">' +
           (item.disabled_at ? new Date(item.disabled_at).toLocaleString(_panelLocale()) : '—') + '</td>' +
         '<td style="color:' + _expiryColor(item.days_left) + '">' + _expiryLabel(item.days_left) + '</td>' +
-        '<td>' +
-          '<button class="btn btn-ghost" style="padding:5px 12px; font-size:0.8rem" ' +
-            'onclick="restoreEntity(&#39;' + item.entity_id + '&#39;, this)">' + t('softRestoreBtn') + '</button>' +
-          '<button class="btn btn-danger" style="padding:5px 12px; font-size:0.8rem; margin-left:8px" ' +
-            'onclick="hardDeleteEntity(&#39;' + item.entity_id + '&#39;, this)">' + t('softHardDelBtn') + '</button>' +
+        '<td class="trash-actions-cell">' +
+          '<div class="trash-actions">' +
+            '<button class="btn btn-ghost" ' +
+              'onclick="restoreEntity(&#39;' + item.entity_id + '&#39;, this)">' + t('softRestoreBtn') + '</button>' +
+            '<button class="btn btn-danger" ' +
+              'onclick="hardDeleteEntity(&#39;' + item.entity_id + '&#39;, this)">' + t('softHardDelBtn') + '</button>' +
+          '</div>' +
         '</td>' +
       '</tr>'
     )).join('');
