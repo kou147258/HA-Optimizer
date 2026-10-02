@@ -234,12 +234,13 @@ class DailyProfiler:
 class SigmaDetector:
     """So sánh giá trị hôm nay với rolling baseline, trả về danh sách anomaly."""
 
+    # (i18n label key, i18n unit key) — resolved by the panel's tVal()
     METRIC_LABELS = {
-        "total_writes":        ("State writes / day",         "times"),
-        "automation_triggers": ("Automation triggers / day",   "times"),
-        "unavail_events":      ("Unavailable events / day",   "times"),
-        "active_entities":     ("Active entities / day",        "entities"),
-        "ha_lifecycle_events": ("HA restart / reload events",  "times"),
+        "total_writes":        ("fp_metric_total_writes",     "fp_unit_times"),
+        "automation_triggers": ("fp_metric_auto_triggers",    "fp_unit_times"),
+        "unavail_events":      ("fp_metric_unavail_events",   "fp_unit_times"),
+        "active_entities":     ("fp_metric_active_entities",  "fp_unit_entities"),
+        "ha_lifecycle_events": ("fp_metric_ha_lifecycle",     "fp_unit_times"),
     }
 
     def detect(
@@ -320,9 +321,19 @@ class SigmaDetector:
                 "direction": direction,
                 "severity": severity,
                 "method": method,
-                "description": (
-                    f"{label} today: {today_val} {unit} ({direction} by {abs(pct_change)}% vs avg {round(mean_val, 1)} {unit}/day)"
-                ),
+                "description": {
+                    "key": "fp_anomaly_desc",
+                    "params": {
+                        "label": label,
+                        "val": today_val,
+                        "unit": unit,
+                        # direction_key is resolved by the panel's tVal() before
+                        # it is interpolated into {direction}
+                        "direction_key": f"fp_direction_{direction}",
+                        "pct": abs(pct_change),
+                        "mean": round(mean_val, 1),
+                    },
+                },
             })
 
         return anomalies
@@ -360,14 +371,16 @@ class CorrelationLinker:
                     ts = ev.get("ts", 0)
                     if ev_type == "homeassistant_start":
                         ts_dt = datetime.utcfromtimestamp(ts)
-                        correlations.append(
-                            f"HA restart at {ts_dt.strftime('%H:%M')} — may cause increased writes due to replay"
-                        )
+                        correlations.append({
+                            "key": "fp_corr_restart",
+                            "params": {"time": ts_dt.strftime("%H:%M")},
+                        })
                     elif ev_type == "component_loaded":
                         ts_dt = datetime.utcfromtimestamp(ts)
-                        correlations.append(
-                            f"Integration load/reload at {ts_dt.strftime('%H:%M')}"
-                        )
+                        correlations.append({
+                            "key": "fp_corr_reload",
+                            "params": {"time": ts_dt.strftime("%H:%M")},
+                        })
 
             # Kiểm tra top writer đặc biệt nổi trội
             if anomaly["metric"] == "total_writes":
@@ -377,18 +390,23 @@ class CorrelationLinker:
                     total = today_metrics.get("total_writes", 1)
                     share = round(top1["writes"] / max(total, 1) * 100)
                     if share >= 20:
-                        correlations.append(
-                            f"{top1['entity_id']} accounts for {share}% of total writes "
-                            f"({top1['writes']} times) — possible loop/flapping"
-                        )
+                        correlations.append({
+                            "key": "fp_corr_top_writer",
+                            "params": {
+                                "entity": top1["entity_id"],
+                                "pct": share,
+                                "n": top1["writes"],
+                            },
+                        })
 
             # Kiểm tra unstable entities hôm nay so với lịch sử
             if anomaly["metric"] == "unavail_events":
                 unstable = today_metrics.get("unstable_entities", [])
                 for ent in unstable[:3]:
-                    correlations.append(
-                        f"{ent['entity_id']} went unavailable {ent['count']} times today"
-                    )
+                    correlations.append({
+                        "key": "fp_corr_unavail",
+                        "params": {"entity": ent["entity_id"], "n": ent["count"]},
+                    })
 
             anomaly = dict(anomaly)
             anomaly["correlations"] = correlations
@@ -678,13 +696,16 @@ def _confidence_level(days: int) -> int:
     return 99
 
 
-def _confidence_label(days: int) -> str:
+def _confidence_label(days: int) -> dict:
+    """Return an i18n {key, params} object resolved by the panel's tVal()."""
     if days == 0:
-        return "No data yet — need at least 3 days of collection"
+        return {"key": "fp_confidence_no_data"}
     if days < 3:
-        return f"Very low ({days} days) — results are indicative only"
-    if days < 7:
-        return f"Low ({days} days) — using IQR instead of σ"
-    if days < 14:
-        return f"Moderate ({days} days) — results are reliable"
-    return f"High ({days} days) — stable baseline"
+        key = "fp_confidence_very_low"
+    elif days < 7:
+        key = "fp_confidence_low"
+    elif days < 14:
+        key = "fp_confidence_moderate"
+    else:
+        key = "fp_confidence_high"
+    return {"key": key, "params": {"days": days}}

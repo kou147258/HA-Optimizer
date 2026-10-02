@@ -215,7 +215,7 @@ class DataScanner:
             age_h = (_time.time() - orphaned_ts) / 3600
             age_d = int(age_h / 24)
             if age_h >= 24:
-                reasons.append(f"Orphaned by HA for {age_d} days (official)")
+                reasons.append({"key": "reason_orphaned_official", "params": {"days": age_d}})
                 risk = RISK_LOW
                 last_changed_dt = datetime.utcfromtimestamp(orphaned_ts).replace(
                     tzinfo=dt_util.UTC
@@ -226,7 +226,7 @@ class DataScanner:
         if not reasons and entry.config_entry_id:
             if entry.config_entry_id not in active_entry_ids:
                 is_dead_entry = True
-                reasons.append("Integration removed (config entry gone)")
+                reasons.append("reason_orphaned")
                 risk = RISK_LOW
 
         # ── Method 3: unavailable state (Orphan Cleaner key insight) ─
@@ -252,7 +252,7 @@ class DataScanner:
                     age_d = int(age_h / 24)
                     if age_d >= 1:  # at least 1 full day
                         is_unavailable = True
-                        reasons.append(f"Unavailable for {age_d} day{'s' if age_d != 1 else ''}")
+                        reasons.append({"key": "reason_unavailable_days", "params": {"days": age_d}})
                         risk = RISK_MEDIUM
                         last_changed_dt = ref_dt
 
@@ -272,7 +272,7 @@ class DataScanner:
                     age_days = (dt_util.utcnow() - last_valid).days
                     if age_days >= self.stale_days:
                         stale = True
-                        reasons.append(f"No real state change in {age_days} days")
+                        reasons.append({"key": "reason_stale_days", "params": {"days": age_days}})
                         risk = RISK_LOW
                 last_changed_dt = last_changed_dt or last_valid or last_any
 
@@ -355,22 +355,22 @@ class DataScanner:
                         last_dt = datetime.fromisoformat(str(last_triggered).replace("Z", "+00:00"))
                         age_days = (dt_util.utcnow() - last_dt).days
                         if age_days >= 90:
-                            reasons.append(f"Not triggered in {age_days} days (>90)")
+                            reasons.append({"key": "reason_auto_not_triggered", "params": {"days": age_days}})
                             risk = RISK_LOW
                     except (ValueError, TypeError):
                         pass
                 else:
-                    reasons.append("Never been triggered")
+                    reasons.append("reason_auto_never_triggered")
                     risk = RISK_LOW
 
                 # Suspicious names
                 for pattern in SUSPICIOUS_PATTERNS:
                     if pattern in name_lower:
-                        reasons.append(f"Suspicious name: '{pattern}'")
+                        reasons.append({"key": "reason_auto_suspicious", "params": {"pattern": pattern}})
                         break
 
                 if state.state == "off":
-                    reasons.append("Automation is currently disabled")
+                    reasons.append("reason_auto_disabled")
 
                 if not reasons:
                     continue
@@ -418,15 +418,15 @@ class DataScanner:
                         )
                         age_days = (dt_util.utcnow() - last_dt).days
                         if age_days >= 90:
-                            reasons.append(f"Script not run in {age_days} days (>90)")
+                            reasons.append({"key": "reason_script_not_run", "params": {"days": age_days}})
                     except (ValueError, TypeError):
                         pass
                 else:
-                    reasons.append("Script has never been run")
+                    reasons.append("reason_script_never_run")
 
                 for pattern in SUSPICIOUS_PATTERNS:
                     if pattern in name_lower:
-                        reasons.append(f"Suspicious name pattern: '{pattern}'")
+                        reasons.append({"key": "reason_suspicious_name", "params": {"pattern": pattern}})
                         break
 
                 if not reasons:
@@ -831,26 +831,28 @@ class DashboardAnalyzer:
     """
 
     # --- Heavy card definitions ---
+    # Second tuple element is an i18n KEY, not prose. The panel resolves it via
+    # tVal(); see panel.html `card_*` entries in the I18N dictionary.
     HEAVY_CARD_SEVERITY: dict[str, tuple[str, str]] = {
-        "camera":                      ("critical", "Live camera stream — high bandwidth & CPU usage"),
-        "map":                         ("critical",  "Heavy map render, slow to load on mobile"),
-        "iframe":                      ("critical",  "Loads external page in iframe, uncontrolled performance"),
-        "custom:apexcharts-card":      ("critical",  "Heavy chart, redraws on every entity update"),
-        "custom:power-flow-card":      ("critical",  "Realtime animation, high CPU when visible"),
-        "custom:floorplan":            ("critical",  "Complex SVG floorplan, slow to load"),
-        "custom:plotly-graph-card":    ("critical",  "Client-side Plotly render, very heavy"),
-        "custom:mini-graph-card":      ("warning",   "Graph card, heavier than built-in history-graph"),
-        "custom:bubble-card":          ("warning",   "Many animations, heavy on mobile"),
-        "custom:mushroom-chips-card":  ("info",      "Many chips continuously polling entities"),
-        "custom:stack-in-card":        ("info",      "Container card, weight depends on inner cards"),
-        "custom:auto-entities":        ("warning",   "Dynamic entity query, runs filter on every update"),
-        "custom:config-template-card": ("warning",   "Continuously evaluates Jinja2 client-side"),
-        "custom:decluttering-card":    ("info",      "Template expansion, verify inner cards"),
-        "history-graph":               ("warning",   "Queries DB on every load, heavy with many entities"),
-        "statistics-graph":            ("warning",   "Queries long-term stats DB, heavy with many entities"),
-        "energy":                      ("warning",   "Energy dashboard, many DB queries"),
-        "logbook":                     ("warning",   "Continuously queries logbook DB"),
-        "todo":                        ("info",      "Polls todo list"),
+        "camera":                      ("critical", "card_camera"),
+        "map":                         ("critical", "card_map"),
+        "iframe":                      ("critical", "card_iframe"),
+        "custom:apexcharts-card":      ("critical", "card_apexcharts"),
+        "custom:power-flow-card":      ("critical", "card_power_flow"),
+        "custom:floorplan":            ("critical", "card_floorplan"),
+        "custom:plotly-graph-card":    ("critical", "card_plotly"),
+        "custom:mini-graph-card":      ("warning",  "card_mini_graph"),
+        "custom:bubble-card":          ("warning",  "card_bubble"),
+        "custom:mushroom-chips-card":  ("info",     "card_mushroom"),
+        "custom:stack-in-card":        ("info",     "card_stack_in"),
+        "custom:auto-entities":        ("warning",  "card_auto_entities"),
+        "custom:config-template-card": ("warning",  "card_config_template"),
+        "custom:decluttering-card":    ("info",     "card_decluttering"),
+        "history-graph":               ("warning",  "card_history_graph"),
+        "statistics-graph":            ("warning",  "card_statistics_graph"),
+        "energy":                      ("warning",  "card_energy"),
+        "logbook":                     ("warning",  "card_logbook"),
+        "todo":                        ("info",     "card_todo"),
     }
 
     # Ngưỡng
@@ -968,9 +970,10 @@ class DashboardAnalyzer:
                             "view": view_title,
                             "card_count": card_count,
                             "severity": sev,
-                            "suggestion": (
-                                f"View '{view_title}' has {card_count} cards — split into multiple views or use tabs/subviews"
-                            ),
+                            "suggestion": {
+                                "key": "dash_overload_split",
+                                "params": {"view": view_title, "n": card_count},
+                            },
                         })
 
                     # ── Per-view complexity measurement (NEW #2) ──
@@ -1012,9 +1015,10 @@ class DashboardAnalyzer:
                                         "entity_count": n,
                                         "entities": egraph[:15],
                                         "severity": "critical" if n > self.GRAPH_ENTITY_CRITICAL else "warning",
-                                        "reason": (
-                                            f"{card_type} with {n} entities — queries {n} separate DB series on every load"
-                                        ),
+                                        "reason": {
+                                            "key": "dash_heavy_graph_reason",
+                                            "params": {"type": card_type, "n": n},
+                                        },
                                     })
                             result["heavy_cards"].append(entry)
 
@@ -1028,10 +1032,10 @@ class DashboardAnalyzer:
                                     "type": card_type,
                                     "title": card.get("title") or card.get("name") or "",
                                     "severity": "warning",
-                                    "reason": (
-                                        f"'{card_type}' not in resource list — "
-                                        f"card will show 'Custom element doesn't exist'"
-                                    ),
+                                    "reason": {
+                                        "key": "dash_custom_not_installed",
+                                        "params": {"type": card_type},
+                                    },
                                 })
 
                         # 3. Template detection
@@ -1045,9 +1049,10 @@ class DashboardAnalyzer:
                                 "title": card.get("title") or card.get("name") or "",
                                 "fields_with_template": tmpl_fields,
                                 "severity": "info",
-                                "reason": (
-                                    f"Jinja2 in: {', '.join(tmpl_fields)} — evaluated every time a related entity changes"
-                                ),
+                                "reason": {
+                                    "key": "dash_template_reason",
+                                    "params": {"fields": ", ".join(tmpl_fields)},
+                                },
                             })
 
                         # 4. DB query cards
@@ -1106,9 +1111,10 @@ class DashboardAnalyzer:
                         "entity_id": eid,
                         "count": cnt,
                         "severity": "warning" if cnt <= 10 else "critical",
-                        "reason": (
-                            f"{eid} appears {cnt} times — consider using group or auto-entities"
-                        ),
+                        "reason": {
+                            "key": "dash_duplicate_reason",
+                            "params": {"entity": eid, "n": cnt},
+                        },
                     }
                     for eid, cnt in global_entity_counter.items()
                     if cnt > self.DUPLICATE_THRESHOLD
@@ -1224,13 +1230,18 @@ class DashboardAnalyzer:
                     "distinct_states": dist,
                     "in_views":      views_containing[:5],
                     "severity":      sev,
-                    "description": (
-                        f"{eid} updates {wpd:.0f} times/day → browser receives {wpd:.0f} WebSocket pushes/day ({dist} distinct values)"
-                    ),
+                    "description": {
+                        "key": "ws_description",
+                        "params": {
+                            "entity": eid,
+                            "wpd": f"{wpd:.0f}",
+                            "dist": dist,
+                        },
+                    },
                     "suggestion": (
-                        "Reduce integration polling, add throttle/filter, or exclude from recorder"
+                        "ws_suggestion_low_dist"
                     ) if dist <= 5 else (
-                        "Check integration config to reduce polling interval"
+                        "ws_suggestion_high_dist"
                     ),
                 })
 
@@ -1251,14 +1262,19 @@ class DashboardAnalyzer:
                         "waste_ratio":    round(waste_ratio, 1),
                         "in_views":       views_containing[:5],
                         "severity":       "critical" if waste_ratio >= 50 else "warning",
-                        "description": (
-                            f"{eid}: {wpd:.0f} writes/day "
-                            f"but only {dist} distinct values "
-                            f"(waste ratio {waste_ratio:.0f}x)"
-                        ),
-                        "suggestion": (
-                            f"Add to recorder exclude or increase filter threshold for integration '{domain}'. Dashboard still works if excluded from recorder."
-                        ),
+                        "description": {
+                            "key": "xref_description",
+                            "params": {
+                                "entity": eid,
+                                "wpd": f"{wpd:.0f}",
+                                "dist": dist,
+                                "ratio": f"{waste_ratio:.0f}",
+                            },
+                        },
+                        "suggestion": {
+                            "key": "xref_suggestion",
+                            "params": {"domain": domain},
+                        },
                         "yaml_snippet": (
                             f"recorder:\n"
                             f"  exclude:\n"
@@ -1456,39 +1472,41 @@ class DashboardAnalyzer:
 
         c_heavy = sum(1 for c in result["heavy_cards"]    if c.get("severity") == "critical")
         w_heavy = sum(1 for c in result["heavy_cards"]    if c.get("severity") == "warning")
-        _add("critical", "heavy_cards",       c_heavy, f"{c_heavy} critical heavy cards")
-        _add("warning",  "heavy_cards",       w_heavy, f"{w_heavy} heavy cards")
+        _add("critical", "heavy_cards",       c_heavy,
+             {"key": "dash_critical_heavy", "params": {"n": c_heavy}})
+        _add("warning",  "heavy_cards",       w_heavy,
+             {"key": "dash_warning_heavy", "params": {"n": w_heavy}})
         _add("critical", "overloaded_views",
              sum(1 for v in result["overloaded_views"] if v["severity"] == "critical"),
-             "overloaded views (critical)")
+             "dash_overloaded_critical")
         _add("warning",  "overloaded_views",
              sum(1 for v in result["overloaded_views"] if v["severity"] == "warning"),
-             "overloaded views (warning)")
-        _add("critical", "missing_entities",  len(result["missing_entities"]),       "entities not found in HA")
-        _add("warning",  "unavailable_entities", len(result["unavailable_entities"]), "entities unavailable/unknown")
-        _add("warning",  "duplicate_entities",len(result["duplicate_entities"]),     "entities duplicated >5 times")
-        _add("warning",  "heavy_graphs",      len(result["heavy_graphs"]),           "graph cards with many entities")
-        _add("warning",  "unconfigured_custom_cards", len(result["unconfigured_custom_cards"]), "custom cards not installed")
-        _add("info",     "template_heavy_cards", len(result["template_heavy_cards"]), "cards with Jinja2 templates")
+             "dash_overloaded_warning")
+        _add("critical", "missing_entities",  len(result["missing_entities"]),       "dash_missing_entities")
+        _add("warning",  "unavailable_entities", len(result["unavailable_entities"]), "dash_unavail_entities")
+        _add("warning",  "duplicate_entities",len(result["duplicate_entities"]),     "dash_duplicate_entities")
+        _add("warning",  "heavy_graphs",      len(result["heavy_graphs"]),           "dash_heavy_graphs")
+        _add("warning",  "unconfigured_custom_cards", len(result["unconfigured_custom_cards"]), "dash_unconfigured_cards")
+        _add("info",     "template_heavy_cards", len(result["template_heavy_cards"]), "dash_template_cards")
         # NEW
         _add("critical", "view_complexity",
              sum(1 for v in result["view_complexity"] if v["severity"] == "critical"),
-             "views with critical complexity score")
+             "dash_complexity_critical")
         _add("warning",  "view_complexity",
              sum(1 for v in result["view_complexity"] if v["severity"] == "warning"),
-             "views with high complexity score")
+             "dash_complexity_warning")
         _add("critical", "ws_pressure",
              sum(1 for w in result["ws_pressure"]     if w["severity"] == "critical"),
-             "entities causing extreme WebSocket push")
+             "dash_ws_critical")
         _add("warning",  "ws_pressure",
              sum(1 for w in result["ws_pressure"]     if w["severity"] == "warning"),
-             "entities causing high WebSocket push")
+             "dash_ws_warning")
         _add("critical", "recorder_crossref",
              sum(1 for r in result["recorder_crossref"] if r["severity"] == "critical"),
-             "entities wasting DB + bandwidth (critical)")
+             "dash_xref_critical")
         _add("warning",  "recorder_crossref",
              sum(1 for r in result["recorder_crossref"] if r["severity"] == "warning"),
-             "entities wasting DB + bandwidth (warning)")
+             "dash_xref_warning")
 
         total_critical = sum(1 for i in issues if i["severity"] == "critical")
         total_warning  = sum(1 for i in issues if i["severity"] == "warning")
@@ -1614,12 +1632,14 @@ class StateStormDetector:
                     # Diagnosis
                     suggestions = []
                     if distinct_states <= 3:
-                        suggestions.append("Value rarely changes but writes continuously — add a filter in the integration")
+                        suggestions.append("storm_low_distinct")
                     if domain == "sensor" and unit in ("°C", "°F", "%", "W", "V", "A"):
-                        suggestions.append("Consider using 'entity_filter' or increase polling interval")
+                        suggestions.append("storm_entity_filter")
                     if changes_1h > baseline_per_hour * 3:
-                        suggestions.append(f"Currently bursting: {changes_1h} times/hour")
-                    suggestions.append("Add to recorder exclude to prevent DB bloat")
+                        suggestions.append(
+                            {"key": "storm_burst", "params": {"n": changes_1h}}
+                        )
+                    suggestions.append("storm_exclude")
 
                     storms.append({
                         "entity_id": entity_id,
@@ -1742,7 +1762,10 @@ class AutomationDeadCodeTracer:
                     issues.append({
                         "type": "dead_trigger",
                         "location": f"Trigger #{idx + 1}",
-                        "description": f"Trigger entity does not exist: {eid}",
+                        "description": {
+                            "key": "dead_trigger_entity",
+                            "params": {"entity": eid},
+                        },
                         "entity": eid,
                     })
 
@@ -1755,7 +1778,10 @@ class AutomationDeadCodeTracer:
                     issues.append({
                         "type": "dead_trigger",
                         "location": f"Trigger #{idx + 1}",
-                        "description": f"Device trigger: device_id '{device_id}' no longer exists",
+                        "description": {
+                            "key": "dead_trigger_device",
+                            "params": {"device": device_id},
+                        },
                         "entity": device_id,
                     })
         return issues
@@ -1773,7 +1799,10 @@ class AutomationDeadCodeTracer:
                     issues.append({
                         "type": "dead_condition",
                         "location": f"Condition #{idx + 1}",
-                        "description": f"Condition entity does not exist: {eid}",
+                        "description": {
+                            "key": "dead_condition_entity",
+                            "params": {"entity": eid},
+                        },
                         "entity": eid,
                     })
                 elif eid and eid in existing:
@@ -1783,7 +1812,10 @@ class AutomationDeadCodeTracer:
                         issues.append({
                             "type": "always_false_condition",
                             "location": f"Condition #{idx + 1}",
-                            "description": f"Entity is always 'unavailable': {eid} → condition always False",
+                            "description": {
+                            "key": "dead_condition_unavail",
+                            "params": {"entity": eid},
+                        },
                             "entity": eid,
                         })
         return issues
@@ -1811,7 +1843,10 @@ class AutomationDeadCodeTracer:
                 issues.append({
                     "type": "dead_action",
                     "location": f"Action #{idx + 1}",
-                    "description": f"Action target does not exist: {eid} (service: {action_type})",
+                    "description": {
+                        "key": "dead_action_target",
+                        "params": {"entity": eid, "service": action_type},
+                    },
                     "entity": eid,
                 })
 
@@ -2107,20 +2142,27 @@ class IntegrationHealthAnalyzer:
         today: int,
         avg_per_day: float,
         is_down_now: bool = False,
-    ) -> list[str]:
+    ) -> list:
+        """Return i18n keys (or {key, params} objects) resolved by the panel."""
         diag = []
         if is_down_now:
-            diag.append("🔴 Hiện đang offline (unavailable/unknown)")
+            diag.append("health_offline_now")
         if today > avg_per_day * 5 and today > 3:
-            diag.append(f"⚡ Spike hôm nay: {today} lần (trung bình {avg_per_day}/ngày)")
+            diag.append({
+                "key": "health_spike_today",
+                "params": {"today": today, "avg": avg_per_day},
+            })
         elif today > avg_per_day * 2 and today > 2:
-            diag.append(f"⚠️ Cao hơn bình thường: {today} vs {avg_per_day}/ngày")
+            diag.append({
+                "key": "health_above_normal",
+                "params": {"today": today, "avg": avg_per_day},
+            })
         if reconnects_7d > 50:
-            diag.append("📶 Có thể nhiễu sóng hoặc thiết bị quá xa hub")
+            diag.append("health_signal")
         elif reconnects_7d > 20:
-            diag.append(f"📶 Mất kết nối {reconnects_7d} lần trong 7 ngày — kiểm tra tín hiệu")
+            diag.append({"key": "health_reconnect_7d", "params": {"n": reconnects_7d}})
         elif reconnects_7d > 5:
-            diag.append(f"🔌 Không ổn định: {reconnects_7d} lần unavailable/7 ngày")
+            diag.append({"key": "health_unstable_7d", "params": {"n": reconnects_7d}})
         if not diag:
-            diag.append("✅ Hoạt động bình thường")
+            diag.append("health_normal")
         return diag

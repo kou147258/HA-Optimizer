@@ -1491,7 +1491,7 @@ async function callService(domain, service, data = {}) {
     }
   }
 
-  throw new Error('Không thể kết nối HA. Panel phải được mở trong sidebar của HA.');
+  throw new Error(t('errConnectHA'));
 }
 
 // ── Connection status indicator ──
@@ -1505,7 +1505,7 @@ function _updateConnStatus() {
     txt.textContent = '✅ Đã kết nối HA';
   } else {
     dot.style.background = 'var(--warning)';
-    txt.textContent = '⚠️ Trusted / Ingress mode';
+    txt.textContent = t('ingressMode');
   }
 }
 
@@ -1980,7 +1980,7 @@ function buildUsedInLinks(usedIn) {
     }
   });
 
-  const more = usedIn.length > 4 ? `<span style="color:var(--text-muted); font-size:0.75rem">+${usedIn.length - 4} more</span>` : '';
+  const more = usedIn.length > 4 ? `<span style="color:var(--text-muted); font-size:0.75rem">${t('moreRefs', usedIn.length - 4)}</span>` : '';
   return `<div style="display:flex; flex-direction:column; gap:2px">${items.join('')}${more}</div>`;
 }
 
@@ -2020,7 +2020,7 @@ function renderTable() {
 
     const yamlBadge = r.is_yaml_entity
       ? `<span class="yaml-badge" title="${r.yaml_location ? r.yaml_location.file + ':' + r.yaml_location.line : 'YAML'}">📄 YAML${r.yaml_location ? ` :${r.yaml_location.line}` : ''}</span>`
-      : '<span style="color:var(--text-muted); font-size:0.75rem">Registry</span>';
+      : `<span style="color:var(--text-muted); font-size:0.75rem">${t('filterRegistry')}</span>`;
     const reasons = (r.reason || []).map(rs => `<span class="reason-tag">${tVal(rs)}</span>`).join('');
 
     return `<tr class="${isSelected ? 'selected' : ''}" data-id="${r.entity_id}">
@@ -2195,7 +2195,7 @@ async function executePurge() {
         if (alreadyDis.length) toast('info', `ℹ️ ${alreadyDis.length} ${t('kpiDisabled')} — ${t('statSoftDel')}`);
       }
     }
-    if (failed.length)     toast('error', `❌ ${failed.length} ${t('thName')} failed`);
+    if (failed.length)     toast('error', `❌ ${failed.length} ${t('thName')} ${t('failedSuffix')}`);
     if (yamlManual.length) toast('warn', `⚠️ ${yamlManual.length} YAML — ${t('filterYaml')}`);
 
     // Update UI: remove processed entities from scan list
@@ -2608,8 +2608,8 @@ function renderDashboardResults(d, ts) {
   if (d.overloaded_views?.length > 0) {
     html += _dashSection('🗂️ ' + t('dashLblOverloadedViews'), d.overloaded_views.map(v => ({
       left: `<strong>${v.dashboard}</strong> → <em>${v.view}</em>`,
-      right: `<span style="color:${sevColor(v.severity)}; font-weight:700">${v.card_count} cards</span>`,
-      detail: v.suggestion,
+      right: `<span style="color:${sevColor(v.severity)}; font-weight:700">${v.card_count} ${t('dashLblCardsCount')}</span>`,
+      detail: tVal(v.suggestion),
       severity: v.severity,
     })));
   }
@@ -2704,7 +2704,7 @@ function renderDashboardResults(d, ts) {
     html += _dashSection('🔌 ' + t('dashLblCustomCards'), d.unconfigured_custom_cards.map(c => ({
       left: `<span class="reason-tag" style="background:rgba(244,67,54,0.1); color:var(--danger); border:1px solid rgba(244,67,54,0.3)">${c.type}</span>`,
       right: `<span style="color:var(--text-muted); font-size:0.78rem">${c.dashboard} › ${c.view||'—'}</span>`,
-      detail: c.reason,
+      detail: tVal(c.reason),
       severity: 'warning',
     })));
   }
@@ -2714,7 +2714,7 @@ function renderDashboardResults(d, ts) {
     html += _dashSection('🧩 ' + t('dashLblTemplateCards'), d.template_heavy_cards.map(c => ({
       left: `<span class="reason-tag">${c.type}</span> ${c.title ? `<em style="color:var(--text-muted)">${c.title}</em>` : ''}`,
       right: `<span style="font-size:0.78rem; color:var(--text-muted)">${c.dashboard}</span>`,
-      detail: c.reason,
+      detail: tVal(c.reason),
       severity: 'info',
     })));
   }
@@ -2916,7 +2916,7 @@ function renderStormResults(d, ts) {
         </div>
       </div>
       <div style="display:flex; flex-wrap:wrap; gap:6px">
-        ${s.suggestions.map(sg => `<span class="reason-tag" style="background:rgba(255,152,0,0.12); color:var(--warning); font-size:0.78rem">${sg}</span>`).join('')}
+        ${s.suggestions.map(sg => `<span class="reason-tag" style="background:rgba(255,152,0,0.12); color:var(--warning); font-size:0.78rem">${tVal(sg)}</span>`).join('')}
       </div>
     </div>`;
   }).join('') + '</div>';
@@ -3076,27 +3076,22 @@ function renderHealthResults(d, ts) {
   const cardsHtml = d.integrations.map(ig => {
     const bd = ig.score_breakdown || {};
     const breakdownRows = [
-      { label: '🔌 Mất kết nối 7 ngày', val: bd.connectivity ?? 0,   detail: `${ig.total_reconnects_7d ?? 0} lần / ${ig.entities_with_issues ?? 0} entity` },
-      { label: '🔴 Đang offline',        val: bd.currently_down ?? 0, detail: `${ig.currently_unavailable ?? 0} entity hiện tại` },
-      { label: '⚙️ Config entry lỗi',    val: bd.config_entry ?? 0,   detail: ig.config_failed_titles?.length ? ig.config_failed_titles.join(', ') : `${ig.config_failed ?? 0} failed, ${ig.config_retrying ?? 0} retrying` },
-      { label: '⚡ Spike hôm nay',       val: bd.error_spike ?? 0,    detail: `${ig.spike_entities ?? 0} entity bất thường` },
+      { label: '🔌 ' + t('healthBdConnectivity'), val: bd.connectivity ?? 0,   detail: t('healthBdConnectivityDetail', {n: ig.total_reconnects_7d ?? 0, m: ig.entities_with_issues ?? 0}) },
+      { label: '🔴 ' + t('healthBdOffline'),        val: bd.currently_down ?? 0, detail: t('healthBdOfflineDetail', {n: ig.currently_unavailable ?? 0}) },
+      { label: '⚙️ ' + t('healthConfigEntryErr'),    val: bd.config_entry ?? 0,   detail: ig.config_failed_titles?.length ? ig.config_failed_titles.join(', ') : t('healthConfigFailed', {failed: ig.config_failed ?? 0, retrying: ig.config_retrying ?? 0}) },
+      { label: '⚡ ' + t('healthBdSpike'),          val: bd.error_spike ?? 0,    detail: t('healthBdSpikeDetail', {n: ig.spike_entities ?? 0}) },
     ].filter(r => r.val < 0);
 
     // Filter out devices that ONLY have battery issues
     const filteredProblems = (ig.problem_entities || []).filter(dev => {
-      const nonBattDiag = dev.diagnosis.filter(dg =>
-        !dg.startsWith('✅') &&
-        !dg.toLowerCase().includes('battery') &&
-        !dg.toLowerCase().includes('pin ') &&
-        !dg.includes('🔋')
-      );
+      const nonBattDiag = dev.diagnosis.filter(dg => !_HIDDEN_DIAG_KEYS.has(_i18nKeyOf(dg)));
       // Keep device if it has reconnects, is offline, or has non-battery diagnosis
       return dev.is_down_now || dev.reconnects_7d > 0 || dev.reconnects_today > 0 || nonBattDiag.length > 0;
     });
     const problemSection = filteredProblems.length
       ? `<div style="margin-top:12px; border-top:1px solid var(--border); padding-top:10px">
           <div style="font-size:0.75rem; font-weight:700; color:var(--text-muted); margin-bottom:6px; text-transform:uppercase">
-            🔍 Thiết bị có vấn đề (${filteredProblems.length})
+            ${t('healthProblemDevicesTitle', {n: filteredProblems.length})}
           </div>
           ${filteredProblems.slice(0, 5).map(dev => `
             <div style="padding:8px 10px; background:var(--bg); border-radius:6px; margin-bottom:5px;
@@ -3107,24 +3102,24 @@ function renderHealthResults(d, ts) {
                   <div style="font-family:monospace; font-size:0.72rem; color:var(--text-muted)">${dev.entity_id}</div>
                 </div>
                 <div style="font-size:0.78rem; text-align:right; white-space:nowrap">
-                  ${dev.is_down_now ? `<span style="color:var(--danger); font-weight:700">● OFFLINE</span>` : `<span style="color:var(--text-muted)">${dev.current_state}</span>`}
+                  ${dev.is_down_now ? `<span style="color:var(--danger); font-weight:700">● ${t('healthOfflineBadge')}</span>` : `<span style="color:var(--text-muted)">${dev.current_state}</span>`}
 
                 </div>
               </div>
               <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:5px">
-                ${dev.reconnects_7d > 0 ? `<span class="reason-tag">📡 ${dev.reconnects_7d}× / 7 ngày</span>` : ''}
-                ${dev.reconnects_today > 0 ? `<span class="reason-tag">⚡ ${dev.reconnects_today}× hôm nay</span>` : ''}
-                ${dev.diagnosis.filter(dg => !dg.startsWith('✅') && !dg.toLowerCase().includes('battery') && !dg.toLowerCase().includes('pin ') && !dg.includes('🔋')).map(dg => `<span class="reason-tag" style="font-size:0.72rem">${dg}</span>`).join('')}
+                ${dev.reconnects_7d > 0 ? `<span class="reason-tag">📡 ${t('healthReconnects7d', {n: dev.reconnects_7d})}</span>` : ''}
+                ${dev.reconnects_today > 0 ? `<span class="reason-tag">⚡ ${t('healthReconnectsToday', {n: dev.reconnects_today})}</span>` : ''}
+                ${dev.diagnosis.filter(dg => !_HIDDEN_DIAG_KEYS.has(_i18nKeyOf(dg))).map(dg => `<span class="reason-tag" style="font-size:0.72rem">${tVal(dg)}</span>`).join('')}
               </div>
             </div>`).join('')}
-          ${filteredProblems.length > 5 ? `<div style="font-size:0.75rem; color:var(--text-muted); padding:4px 0">... và ${filteredProblems.length - 5} thiết bị khác</div>` : ''}
+          ${filteredProblems.length > 5 ? `<div style="font-size:0.75rem; color:var(--text-muted); padding:4px 0">... ${t('healthMoreDevices', {n: filteredProblems.length - 5})}</div>` : ''}
         </div>`
       : '';
 
     const configWarning = (ig.config_failed > 0 || ig.config_retrying > 0)
       ? `<div style="margin-top:8px; padding:6px 10px; background:rgba(244,67,54,0.1);
              border-radius:6px; font-size:0.78rem; color:var(--danger); border:1px solid rgba(244,67,54,0.2)">
-           ⚙️ Config entry: ${ig.config_failed ?? 0} failed${ig.config_retrying > 0 ? `, ${ig.config_retrying} retrying` : ''}
+           ⚙️ ${t('healthConfigEntry')}: ${t('healthConfigFailed', {failed: ig.config_failed ?? 0, retrying: ig.config_retrying > 0 ? ig.config_retrying : 0})}
            ${ig.config_failed_titles?.length ? `<div style="margin-top:3px; font-size:0.72rem; opacity:0.8">${ig.config_failed_titles.join(' · ')}</div>` : ''}
          </div>`
       : '';
@@ -3376,12 +3371,12 @@ function renderFingerprintResults(d, ts) {
         <div class="stat-card" style="text-align:left; padding:16px; border-left:4px solid ${sevColor}">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; flex-wrap:wrap; gap:8px">
             <div>
-              <div style="font-weight:700; font-size:1rem">${sevIcon} ${a.label}</div>
+              <div style="font-weight:700; font-size:1rem">${sevIcon} ${tVal(a.label)}</div>
               <div style="font-size:0.82rem; color:var(--text-muted); margin-top:2px">${tVal(a.description)}</div>
             </div>
             <div style="text-align:right; flex-shrink:0">
               <div style="font-size:1.6rem; font-weight:800; color:${sevColor}; line-height:1">${arrow}${Math.abs(a.pct_change)}%</div>
-              <div style="font-size:0.75rem; color:var(--text-muted)">vs ${t('fpVsAvg')} ${a.baseline_mean} ${a.unit}/${t('fpPerDay')}</div>
+              <div style="font-size:0.75rem; color:var(--text-muted)">vs ${t('fpVsAvg')} ${a.baseline_mean} ${tVal(a.unit)}/${t('fpPerDay')}</div>
             </div>
           </div>
           <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px">
@@ -3391,8 +3386,8 @@ function renderFingerprintResults(d, ts) {
             <div style="flex-shrink:0">${spark}</div>
           </div>
           <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
-            <span class="reason-tag" style="background:var(--surface2)">${t('fpToday')}: <strong style="color:${sevColor}">${a.today} ${a.unit}</strong></span>
-            <span class="reason-tag" style="background:var(--surface2)">${t('fpBaselineAvg')}: ${a.baseline_mean} ${a.unit}</span>
+            <span class="reason-tag" style="background:var(--surface2)">${t('fpToday')}: <strong style="color:${sevColor}">${a.today} ${tVal(a.unit)}</strong></span>
+            <span class="reason-tag" style="background:var(--surface2)">${t('fpBaselineAvg')}: ${a.baseline_mean} ${tVal(a.unit)}</span>
             <span class="reason-tag" style="background:var(--surface2); color:var(--text-muted)">${t('fpMethod')}: ${a.method} · ${a.baseline_days} ${t('fpDays')}</span>
           </div>
           ${corrHtml}
@@ -3662,8 +3657,8 @@ const I18N = {
     stormsDesc: 'Tìm entity đang update bất thường → nguyên nhân DB phình & browser lag',
     deadcodeDesc: 'Tìm automation có trigger/action/condition trỏ đến entity không còn tồn tại',
     healthDesc: 'Phân tích reconnect, pin yếu, nhiễu sóng theo từng integration',
-    fingerprintDesc: '<span data-i18n="fingerprintDesc">So sánh HA hôm nay với <strong>chính nó</strong> trong quá khứ — phát hiện bất thường về writes, trigger, reconnect.',
-    fingerprintCollectHint: '<span data-i18n="fingerprintCollectHint">Nhấn &quot;Thu thập Baseline&quot; mỗi ngày để tích lũy dữ liệu.',
+    fingerprintDesc: 'So sánh HA hôm nay với <strong>chính nó</strong> trong quá khứ — phát hiện bất thường về writes, trigger, reconnect.',
+    fingerprintCollectHint: 'Nhấn &quot;Thu thập Baseline&quot; mỗi ngày để tích lũy dữ liệu.',
     backupNotice: '⚠️ Hãy backup trước khi xóa!',
     selectedCount: (n) => `${n} đã chọn`,
     noUsage: 'Không dùng',
@@ -3975,7 +3970,30 @@ const I18N = {
     addonStopped2: (slug) => `Đã dừng ${slug}`,
     addonErrorTitle: 'Không thể lấy dữ liệu Add-on',
     addonErrorDesc: 'Cần <strong>Home Assistant OS</strong> hoặc <strong>Supervised</strong>.<br>HA Container / Core không có Supervisor API.',
-  },
+  
+    reason_orphaned_official: 'HA đã đánh dấu mồ côi trong {days} ngày (chính thức)',
+    reason_unavailable_days: 'Không khả dụng trong {days} ngày',
+    health_offline_now: '🔴 Hiện đang offline (unavailable/unknown)',
+    health_reconnect_7d: '📶 Mất kết nối {n} lần trong 7 ngày — kiểm tra tín hiệu',
+    health_unstable_7d: '🔌 Không ổn định: {n} lần unavailable/7 ngày',
+    health_normal: '✅ Hoạt động bình thường',
+    errConnectHA: 'Không thể kết nối HA. Panel phải được mở từ thanh bên của HA.',
+    ingressMode: '⚠️ Chế độ Trusted / Ingress',
+    failedSuffix: 'thất bại',
+    healthOfflineBadge: 'OFFLINE',
+    healthReconnects7d: '{n}× / 7 ngày',
+    healthReconnectsToday: '{n}× hôm nay',
+    healthMoreDevices: 'và {n} thiết bị khác',
+    healthConfigEntry: 'Config entry',
+    healthConfigEntryErr: 'Config entry lỗi',
+    healthConfigFailed: '{failed} lỗi, {retrying} đang thử lại',
+    healthBdConnectivity: 'Mất kết nối 7 ngày',
+    healthBdConnectivityDetail: '{n} lần / {m} entity',
+    healthBdOffline: 'Đang offline',
+    healthBdOfflineDetail: '{n} entity hiện tại',
+    healthBdSpike: 'Spike hôm nay',
+    healthBdSpikeDetail: '{n} entity bất thường',
+    healthProblemDevicesTitle: '🔍 Thiết bị có vấn đề ({n})',},
   en: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Donate',
@@ -4339,7 +4357,30 @@ const I18N = {
     addonStopped2: (slug) => `Stopped ${slug}`,
     addonErrorTitle: 'Cannot load Add-on data',
     addonErrorDesc: 'Requires <strong>Home Assistant OS</strong> or <strong>Supervised</strong>.<br>HA Container / Core does not have Supervisor API.',
-  },
+  
+    reason_orphaned_official: 'Orphaned by HA for {days} days (official)',
+    reason_unavailable_days: 'Unavailable for {days} days',
+    health_offline_now: '🔴 Currently offline (unavailable/unknown)',
+    health_reconnect_7d: '📶 Lost connection {n} times in 7 days — check signal',
+    health_unstable_7d: '🔌 Unstable: {n} unavailable events in 7 days',
+    health_normal: '✅ Operating normally',
+    errConnectHA: 'Cannot connect to HA. The panel must be opened from the HA sidebar.',
+    ingressMode: '⚠️ Trusted / Ingress mode',
+    failedSuffix: 'failed',
+    healthOfflineBadge: 'OFFLINE',
+    healthReconnects7d: '{n}× / 7 days',
+    healthReconnectsToday: '{n}× today',
+    healthMoreDevices: 'and {n} more devices',
+    healthConfigEntry: 'Config entry',
+    healthConfigEntryErr: 'Config entry errors',
+    healthConfigFailed: '{failed} failed, {retrying} retrying',
+    healthBdConnectivity: 'Reconnects (7 days)',
+    healthBdConnectivityDetail: '{n}× / {m} entities',
+    healthBdOffline: 'Currently offline',
+    healthBdOfflineDetail: '{n} entities right now',
+    healthBdSpike: 'Spike today',
+    healthBdSpikeDetail: '{n} unusual entities',
+    healthProblemDevicesTitle: '🔍 Problem devices ({n})',},
   de: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Spenden',
@@ -4689,7 +4730,69 @@ const I18N = {
     addonStopped2: (slug) => `${slug} gestoppt`,
     addonErrorTitle: 'Add-on-Daten konnten nicht geladen werden',
     addonErrorDesc: 'Erfordert <strong>Home Assistant OS</strong> oder <strong>Supervised</strong>.<br>HA Container / Core hat keine Supervisor API.',
-  },
+  
+    reason_orphaned_official: 'Seit {days} Tagen von HA verwaist (offiziell)',
+    reason_unavailable_days: '{days} Tage nicht verfügbar',
+    health_offline_now: '🔴 Derzeit offline (nicht verfügbar/unbekannt)',
+    health_reconnect_7d: '📶 Verbindung {n}× in 7 Tagen verloren — Signal prüfen',
+    health_unstable_7d: '🔌 Instabil: {n}× nicht verfügbar in 7 Tagen',
+    health_normal: '✅ Normalbetrieb',
+    errConnectHA: 'Keine Verbindung zu HA möglich. Das Panel muss über die HA-Seitenleiste geöffnet werden.',
+    ingressMode: '⚠️ Trusted-/Ingress-Modus',
+    failedSuffix: 'fehlgeschlagen',
+    healthOfflineBadge: 'OFFLINE',
+    healthReconnects7d: '{n}× / 7 Tage',
+    healthReconnectsToday: '{n}× heute',
+    healthMoreDevices: 'und {n} weitere Geräte',
+    healthConfigEntry: 'Config-Eintrag',
+    healthConfigEntryErr: 'Config-Eintrag-Fehler',
+    healthConfigFailed: '{failed} fehlgeschlagen, {retrying} in Wiederholung',
+    recorderLoading: 'Recorder-DB wird abgefragt...',
+    dashLblScore: 'Dashboard-Bewertung',
+    dashLblDashboards: 'Dashboards',
+    dashLblCritical: 'Kritisch',
+    dashLblWarning: 'Warnung',
+    dashLblWSPressure: 'WS-Druck',
+    dashLblDBWaste: 'DB-Verschwendung',
+    dashLblEntityRefs: 'Entity-Referenzen',
+    dashLblViews: 'Views',
+    dashLblCards: 'Karten',
+    dashLblOverloadedViews: 'Überladene Views',
+    dashLblHeavyCards: 'Schwere Karten',
+    dashLblHeavyGraphs: 'Schwere Graph-Karten',
+    dashLblMissingEntities: 'Fehlende Entities',
+    dashLblMissingEntitiesDesc: 'Diese Entities lassen Karten fehlschlagen oder leer erscheinen.',
+    dashLblUnavailEntities: 'Nicht verfügbar/unbekannt',
+    dashLblUnavailEntitiesDesc: 'Existiert, meldet sich aber derzeit als nicht verfügbar/unbekannt — Karten zeigen „Nicht verfügbar“.',
+    dashLblDupEntities: 'Doppelte Entities',
+    dashLblCustomCards: 'Nicht installierte Custom Cards',
+    dashLblTemplateCards: 'Karten mit Jinja2-Templates',
+    dashLblComplexViews: 'Komplexe Views',
+    dashLblComplexViewsDesc: 'Hohe Komplexität → viele Entity-Abos + schweres DOM → langsames Rendern auf Mobilgeräten.',
+    dashLblWSSection: 'WebSocket-Push-Druck',
+    dashLblWSDesc: 'Entity-Aktualisierungsrate → WebSocket-Pushes/Tag an den Browser. Echte Last, unabhängig vom Kartentyp.',
+    dashLblPushPerDay: 'Pushes/Tag',
+    dashLblDistinctStates: 'verschiedene Zustände',
+    dashLblDBXref: 'Recorder-Querverweis — Dashboard → DB',
+    dashLblDBXrefDesc: 'Viele Schreibvorgänge, wenige verschiedene Zustände → verschwendete DB + WebSocket-Bandbreite. Kann vom Recorder ausgeschlossen werden — das Dashboard bleibt korrekt.',
+    dashLblWritesPerDay: 'Schreibvorgänge/Tag',
+    dashLblWaste: 'Verschwendung',
+    dashLblYamlSuggestion: 'YAML-Vorschlag',
+    dashLblDashboard: 'Dashboard › View',
+    dashLblCardsCount: 'Karten',
+    dashLblEntitySubs: 'Entity-Abonnements',
+    dashLblTemplates: 'Templates',
+    dashLblDBQueries: 'DB-Abfragen',
+    dashLblCustomCount: 'Custom Cards',
+    dashLblNestingDepth: 'Verschachtelungstiefe',
+    dashLblEntity: 'Entity',
+    healthBdConnectivity: 'Reconnects (7 Tage)',
+    healthBdConnectivityDetail: '{n}× / {m} Entities',
+    healthBdOffline: 'Derzeit offline',
+    healthBdOfflineDetail: '{n} Entities gerade jetzt',
+    healthBdSpike: 'Spike heute',
+    healthBdSpikeDetail: '{n} ungewöhnliche Entities',
+    healthProblemDevicesTitle: '🔍 Geräte mit Problemen ({n})',},
   fr: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Faire un don',
@@ -5075,7 +5178,31 @@ const I18N = {
     addonStopped2: (slug) => `${slug} arrêté`,
     addonErrorTitle: 'Impossible de charger les données Add-on',
     addonErrorDesc: 'Nécessite <strong>Home Assistant OS</strong> ou <strong>Supervised</strong>.<br>HA Container / Core ne dispose pas de l\'API Supervisor.',
-  },
+  
+    reason_orphaned_official: 'Orphelin par HA depuis {days} jours (officiel)',
+    reason_unavailable_days: 'Indisponible depuis {days} jours',
+    health_offline_now: '🔴 actuellement hors ligne (indisponible/inconnu)',
+    health_reconnect_7d: '📶 Connexion perdue {n} fois en 7 jours — vérifier le signal',
+    health_unstable_7d: '🔌 Instable : {n} événements indisponible en 7 jours',
+    health_normal: '✅ Fonctionnement normal',
+    errConnectHA: 'Impossible de se connecter à HA. Le panneau doit être ouvert depuis la barre latérale de HA.',
+    ingressMode: '⚠️ Mode Trusted / Ingress',
+    failedSuffix: 'échoué',
+    healthOfflineBadge: 'HORS LIGNE',
+    healthReconnects7d: '{n}× / 7 jours',
+    healthReconnectsToday: '{n}× aujourd’hui',
+    healthMoreDevices: 'et {n} autres appareils',
+    healthConfigEntry: 'Entrée de configuration',
+    healthConfigEntryErr: 'Erreurs d’entrée de configuration',
+    healthConfigFailed: '{failed} échoué(s), {retrying} en nouvelle tentative',
+    recorderLoading: 'Interrogation de la base recorder...',
+    healthBdConnectivity: 'Reconnexions (7 jours)',
+    healthBdConnectivityDetail: '{n}× / {m} entités',
+    healthBdOffline: 'Actuellement hors ligne',
+    healthBdOfflineDetail: '{n} entités actuellement',
+    healthBdSpike: 'Pic aujourd’hui',
+    healthBdSpikeDetail: '{n} entités inhabituelles',
+    healthProblemDevicesTitle: '🔍 Appareils en problème ({n})',},
   nl: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Doneren',
@@ -5462,7 +5589,31 @@ const I18N = {
     addonStopped2: (slug) => `${slug} gestopt`,
     addonErrorTitle: 'Kan add-on gegevens niet laden',
     addonErrorDesc: 'Vereist <strong>Home Assistant OS</strong> of <strong>Supervised</strong>.<br>HA Container / Core heeft geen Supervisor API.',
-  },
+  
+    reason_orphaned_official: 'Al {days} dagen door HA verweesd (officieel)',
+    reason_unavailable_days: '{days} dagen niet beschikbaar',
+    health_offline_now: '🔴 Nu offline (niet beschikbaar/onbekend)',
+    health_reconnect_7d: '📶 {n}× verbinding verloren in 7 dagen — controleer het signaal',
+    health_unstable_7d: '🔌 Instabiel: {n}× niet beschikbaar in 7 dagen',
+    health_normal: '✅ Werkt normaal',
+    errConnectHA: 'Kan geen verbinding maken met HA. Het paneel moet via de HA-zijbalk worden geopend.',
+    ingressMode: '⚠️ Trusted / Ingress-modus',
+    failedSuffix: 'mislukt',
+    healthOfflineBadge: 'OFFLINE',
+    healthReconnects7d: '{n}× / 7 dagen',
+    healthReconnectsToday: '{n}× vandaag',
+    healthMoreDevices: 'en nog {n} apparaten',
+    healthConfigEntry: 'Configuratie-item',
+    healthConfigEntryErr: 'Fouten in configuratie-item',
+    healthConfigFailed: '{failed} mislukt, {retrying} opnieuw proberen',
+    recorderLoading: 'Recorder-database wordt geraadpleegd...',
+    healthBdConnectivity: 'Herverbindingen (7 dagen)',
+    healthBdConnectivityDetail: '{n}× / {m} apparaten',
+    healthBdOffline: 'Nu offline',
+    healthBdOfflineDetail: '{n} apparaten nu',
+    healthBdSpike: 'Piek vandaag',
+    healthBdSpikeDetail: '{n} ongebruikelijke apparaten',
+    healthProblemDevicesTitle: '🔍 Apparaten met problemen ({n})',},
   pl: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Wsparcie',
@@ -5849,7 +6000,31 @@ const I18N = {
     addonStopped2: (slug) => `${slug} zatrzymano`,
     addonErrorTitle: 'Nie można załadować danych Add-on',
     addonErrorDesc: 'Wymagany <strong>Home Assistant OS</strong> lub <strong>Supervised</strong>.<br>HA Container / Core nie ma API Supervisor.',
-  },
+  
+    reason_orphaned_official: 'Osierocony przez HA od {days} dni (oficjalne)',
+    reason_unavailable_days: 'Niedostępny od {days} dni',
+    health_offline_now: '🔴 Obecnie offline (niedostępny/nieznany)',
+    health_reconnect_7d: '📶 Utrata połączenia {n} razy w 7 dni — sprawdź sygnał',
+    health_unstable_7d: '🔌 Niestabilny: {n} razy niedostępny w 7 dni',
+    health_normal: '✅ Działa normalnie',
+    errConnectHA: 'Nie można połączyć się z HA. Panel musi być otwarty z paska bocznego HA.',
+    ingressMode: '⚠️ Tryb Trusted / Ingress',
+    failedSuffix: 'niepowodzeń',
+    healthOfflineBadge: 'OFFLINE',
+    healthReconnects7d: '{n}× / 7 dni',
+    healthReconnectsToday: '{n}× dzisiaj',
+    healthMoreDevices: 'i {n} innych urządzeń',
+    healthConfigEntry: 'Wpis konfiguracji',
+    healthConfigEntryErr: 'Błędy wpisów konfiguracji',
+    healthConfigFailed: '{failed} niepowodzeń, {retrying} w ponawianiu',
+    recorderLoading: 'Odpytywanie bazy recorder...',
+    healthBdConnectivity: 'Ponowne połączenia (7 dni)',
+    healthBdConnectivityDetail: '{n}× / {m} encji',
+    healthBdOffline: 'Obecnie offline',
+    healthBdOfflineDetail: '{n} encji teraz',
+    healthBdSpike: 'Skok dzisiaj',
+    healthBdSpikeDetail: '{n} nietypowych encji',
+    healthProblemDevicesTitle: '🔍 Urządzenia z problemami ({n})',},
   sv: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Donera',
@@ -6236,7 +6411,31 @@ const I18N = {
     addonStopped2: (slug) => `${slug} stoppades`,
     addonErrorTitle: 'Kan inte ladda tilläggsdata',
     addonErrorDesc: 'Kräver <strong>Home Assistant OS</strong> eller <strong>Supervised</strong>.<br>HA Container / Core saknar Supervisor API.',
-  },
+  
+    reason_orphaned_official: 'Föräldralös i HA sedan {days} dagar (officiellt)',
+    reason_unavailable_days: 'Inte tillgänglig i {days} dagar',
+    health_offline_now: '🔴 Currently offline (inte tillgänglig/okänd)',
+    health_reconnect_7d: '📶 Tappade anslutning {n} gånger på 7 dagar — kontrollera signalen',
+    health_unstable_7d: '🔌 Instabil: {n} gånger otillgänglig på 7 dagar',
+    health_normal: '✅ Fungerar normalt',
+    errConnectHA: 'Kan inte ansluta till HA. Panelen måste öppnas från HA:s sidopanel.',
+    ingressMode: '⚠️ Trusted / Ingress-läge',
+    failedSuffix: 'misslyckades',
+    healthOfflineBadge: 'OFFLINE',
+    healthReconnects7d: '{n}× / 7 dagar',
+    healthReconnectsToday: '{n}× idag',
+    healthMoreDevices: 'och {n} andra enheter',
+    healthConfigEntry: 'Konfigurationspost',
+    healthConfigEntryErr: 'Fel i konfigurationsposter',
+    healthConfigFailed: '{failed} misslyckade, {retrying} försöker igen',
+    recorderLoading: 'Frågar recorder-databasen...',
+    healthBdConnectivity: 'Återanslutningar (7 dagar)',
+    healthBdConnectivityDetail: '{n}× / {m} entiteter',
+    healthBdOffline: 'Currently offline',
+    healthBdOfflineDetail: '{n} entiteter just nu',
+    healthBdSpike: 'Spike idag',
+    healthBdSpikeDetail: '{n} ovanliga entiteter',
+    healthProblemDevicesTitle: '🔍 Enheter med problem ({n})',},
   hu: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Adományozás',
@@ -6623,7 +6822,31 @@ const I18N = {
     addonStopped2: (slug) => `${slug} leállítva`,
     addonErrorTitle: 'Nem sikerült betölteni a kiegészítő adatokat',
     addonErrorDesc: 'Szükséges: <strong>Home Assistant OS</strong> vagy <strong>Supervised</strong>.<br>HA Container / Core nem rendelkezik Supervisor API-val.',
-  },
+  
+    reason_orphaned_official: 'A HA {days} napja árva jelölte (hivatalos)',
+    reason_unavailable_days: '{days} napja nem elérhető',
+    health_offline_now: '🔴 Jelenleg offline (nem elérhető/ismeretlen)',
+    health_reconnect_7d: '📶 {n}× kapcsolatvesztés 7 nap alatt — ellenőrizze a jelet',
+    health_unstable_7d: '🔌 Instabil: {n}× nem elérhető 7 nap alatt',
+    health_normal: '✅ Normál működés',
+    errConnectHA: 'Nem lehet csatlakozni a HA-hoz. A panelt a HA oldalsávjából kell megnyitni.',
+    ingressMode: '⚠️ Trusted / Ingress mód',
+    failedSuffix: 'sikertelen',
+    healthOfflineBadge: 'OFFLINE',
+    healthReconnects7d: '{n}× / 7 nap',
+    healthReconnectsToday: '{n}× ma',
+    healthMoreDevices: 'és további {n} eszköz',
+    healthConfigEntry: 'Konfigurációs bejegyzés',
+    healthConfigEntryErr: 'Konfigurációs bejegyzés-hibák',
+    healthConfigFailed: '{failed} sikertelen, {retrying} újrapróbálkozás',
+    recorderLoading: 'Recorder-adatbázis lekérdezése...',
+    healthBdConnectivity: 'Újracsatlakozások (7 nap)',
+    healthBdConnectivityDetail: '{n}× / {m} entitás',
+    healthBdOffline: 'Jelenleg offline',
+    healthBdOfflineDetail: '{n} entitás most',
+    healthBdSpike: 'Csúcs ma',
+    healthBdSpikeDetail: '{n} szokatlan entitás',
+    healthProblemDevicesTitle: '🔍 Problémás eszközök ({n})',},
   cs: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Podpořit',
@@ -7010,7 +7233,31 @@ const I18N = {
     addonStopped2: (slug) => `${slug} zastaveno`,
     addonErrorTitle: 'Nelze načíst data doplňku',
     addonErrorDesc: 'Vyžaduje <strong>Home Assistant OS</strong> nebo <strong>Supervised</strong>.<br>HA Container / Core nemá Supervisor API.',
-  },
+  
+    reason_orphaned_official: 'Osiřelý v HA po {days} dní (oficiální)',
+    reason_unavailable_days: 'Nedostupný po {days} dní',
+    health_offline_now: '🔴 Aktuálně offline (nedostupný/neznámý)',
+    health_reconnect_7d: '📶 Ztráta připojení {n}× za 7 dní — zkontrolujte signál',
+    health_unstable_7d: '🔌 Nestabilní: {n}× nedostupný za 7 dní',
+    health_normal: '✅ Provozuje se normálně',
+    errConnectHA: 'Nelze se připojit k HA. Panel musí být otevřen z postranní lišty HA.',
+    ingressMode: '⚠️ Režim Trusted / Ingress',
+    failedSuffix: 'selhalo',
+    healthOfflineBadge: 'OFFLINE',
+    healthReconnects7d: '{n}× / 7 dní',
+    healthReconnectsToday: '{n}× dnes',
+    healthMoreDevices: 'a {n} dalších zařízení',
+    healthConfigEntry: 'Konfigurační položka',
+    healthConfigEntryErr: 'Chyby konfiguračních položek',
+    healthConfigFailed: '{failed} selhalo, {retrying} se opakuje',
+    recorderLoading: 'Dotazování databáze recorderu...',
+    healthBdConnectivity: 'Znovupřipojení (7 dní)',
+    healthBdConnectivityDetail: '{n}× / {m} entit',
+    healthBdOffline: 'Aktuálně offline',
+    healthBdOfflineDetail: '{n} entit právě teď',
+    healthBdSpike: 'Špička dnes',
+    healthBdSpikeDetail: '{n} neobvyklých entit',
+    healthProblemDevicesTitle: '🔍 Zařízení s problémy ({n})',},
   it: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Donazione',
@@ -7436,7 +7683,31 @@ const I18N = {
     addonStopped2: (slug) => `${slug} fermato`,
     addonErrorTitle: 'Impossibile caricare i dati Add-on',
     addonErrorDesc: 'Richiede <strong>Home Assistant OS</strong> o <strong>Supervised</strong>.<br>HA Container / Core non dispone dell\'API Supervisor.',
-  },
+  
+    reason_orphaned_official: 'Orfano da HA da {days} giorni (ufficiale)',
+    reason_unavailable_days: 'Non disponibile da {days} giorni',
+    health_offline_now: '🔴 Attualmente offline (non disponibile/sconosciuto)',
+    health_reconnect_7d: '📶 Connessione persa {n} volte in 7 giorni — controlla il segnale',
+    health_unstable_7d: '🔌 Instabile: {n} eventi non disponibile in 7 giorni',
+    health_normal: '✅ Funzionamento normale',
+    errConnectHA: 'Impossibile connettersi a HA. Il pannello deve essere aperto dalla barra laterale di HA.',
+    ingressMode: '⚠️ Modalità Trusted / Ingress',
+    failedSuffix: 'falliti',
+    healthOfflineBadge: 'OFFLINE',
+    healthReconnects7d: '{n}× / 7 giorni',
+    healthReconnectsToday: '{n}× oggi',
+    healthMoreDevices: 'e altri {n} dispositivi',
+    healthConfigEntry: 'Voce di configurazione',
+    healthConfigEntryErr: 'Errori voci di configurazione',
+    healthConfigFailed: '{failed} falliti, {retrying} in riprova',
+    recorderLoading: 'Interrogazione del database recorder...',
+    healthBdConnectivity: 'Riconnessioni (7 giorni)',
+    healthBdConnectivityDetail: '{n}× / {m} entità',
+    healthBdOffline: 'Attualmente offline',
+    healthBdOfflineDetail: '{n} entità adesso',
+    healthBdSpike: 'Picco oggi',
+    healthBdSpikeDetail: '{n} entità insolite',
+    healthProblemDevicesTitle: '🔍 Dispositivi problematici ({n})',},
   pt: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Doação',
@@ -7784,7 +8055,69 @@ const I18N = {
     addonStopped2: (slug) => `${slug} parado`,
     addonErrorTitle: 'Não foi possível carregar dados do Add-on',
     addonErrorDesc: 'Requer <strong>Home Assistant OS</strong> ou <strong>Supervised</strong>.<br>HA Container / Core não possui API Supervisor.',
-  },
+  
+    reason_orphaned_official: 'Órfão pelo HA há {days} dias (oficial)',
+    reason_unavailable_days: 'Indisponível há {days} dias',
+    health_offline_now: '🔴 Atualmente offline (indisponível/desconhecido)',
+    health_reconnect_7d: '📶 Conexão perdida {n} vezes em 7 dias — verifique o sinal',
+    health_unstable_7d: '🔌 Instável: {n} eventos indisponível em 7 dias',
+    health_normal: '✅ Funcionando normalmente',
+    errConnectHA: 'Não foi possível conectar ao HA. O painel deve ser aberto pela barra lateral do HA.',
+    ingressMode: '⚠️ Modo Trusted / Ingress',
+    failedSuffix: 'falharam',
+    healthOfflineBadge: 'OFFLINE',
+    healthReconnects7d: '{n}× / 7 dias',
+    healthReconnectsToday: '{n}× hoje',
+    healthMoreDevices: 'e mais {n} dispositivos',
+    healthConfigEntry: 'Entrada de configuração',
+    healthConfigEntryErr: 'Erros nas entradas de configuração',
+    healthConfigFailed: '{failed} falharam, {retrying} tentando novamente',
+    recorderLoading: 'Consultando o banco do recorder...',
+    dashLblScore: 'Pontuação do painel',
+    dashLblDashboards: 'Painéis',
+    dashLblCritical: 'Crítico',
+    dashLblWarning: 'Aviso',
+    dashLblWSPressure: 'Pressão WS',
+    dashLblDBWaste: 'Desperdício de DB',
+    dashLblEntityRefs: 'Refs de entidades',
+    dashLblViews: 'Visualizações',
+    dashLblCards: 'Cartões',
+    dashLblOverloadedViews: 'Visualizações sobrecarregadas',
+    dashLblHeavyCards: 'Cartões pesados',
+    dashLblHeavyGraphs: 'Cartões de gráfico pesados',
+    dashLblMissingEntities: 'Entidades ausentes',
+    dashLblMissingEntitiesDesc: 'Estas entidades fazem os cartões falharem ou aparecerem em branco.',
+    dashLblUnavailEntities: 'Indisponíveis/desconhecidas',
+    dashLblUnavailEntitiesDesc: 'Existem mas reportam indisponível/desconhecido — os cartões mostram "Indisponível".',
+    dashLblDupEntities: 'Entidades duplicadas',
+    dashLblCustomCards: 'Cartões personalizados não instalados',
+    dashLblTemplateCards: 'Cartões com templates Jinja2',
+    dashLblComplexViews: 'Visualizações complexas',
+    dashLblComplexViewsDesc: 'Alta complexidade → muitas assinaturas de entidades + DOM pesado → renderização lenta no celular.',
+    dashLblWSSection: 'Pressão de push WebSocket',
+    dashLblWSDesc: 'Frequência de atualização das entidades → pushes WebSocket/dia para o navegador. Carga real, independente do tipo de cartão.',
+    dashLblPushPerDay: 'pushes/dia',
+    dashLblDistinctStates: 'estados distintos',
+    dashLblDBXref: 'Referência cruzada do recorder — Painel → DB',
+    dashLblDBXrefDesc: 'Muitas gravações, poucos estados distintos → DB + banda WebSocket desperdiçados. Pode excluir do recorder — o painel continua exibindo corretamente.',
+    dashLblWritesPerDay: 'gravações/dia',
+    dashLblWaste: 'desperdício',
+    dashLblYamlSuggestion: 'Sugestão YAML',
+    dashLblDashboard: 'Painel › Visualização',
+    dashLblCardsCount: 'cartões',
+    dashLblEntitySubs: 'assinaturas de entidades',
+    dashLblTemplates: 'templates',
+    dashLblDBQueries: 'consultas ao DB',
+    dashLblCustomCount: 'cartões personalizados',
+    dashLblNestingDepth: 'profundidade de aninhamento',
+    dashLblEntity: 'entidade',
+    healthBdConnectivity: 'Reconexões (7 dias)',
+    healthBdConnectivityDetail: '{n}× / {m} entidades',
+    healthBdOffline: 'Atualmente offline',
+    healthBdOfflineDetail: '{n} entidades agora',
+    healthBdSpike: 'Pico hoje',
+    healthBdSpikeDetail: '{n} entidades incomuns',
+    healthProblemDevicesTitle: '🔍 Dispositivos com problema ({n})',},
   sl: {
     appTitle: '🧹 HA Optimizer',
     donate: 'Podpri',
@@ -8210,7 +8543,31 @@ const I18N = {
     addonStopped2: (slug) => `${slug} ustavljeno`,
     addonErrorTitle: 'Podatkov dodatka ni mogoče naložiti',
     addonErrorDesc: 'Zahteva <strong>Home Assistant OS</strong> ali <strong>Supervised</strong>.<br>HA Container / Core nima API-ja Supervisor.',
-  },
+  
+    reason_orphaned_official: 'Sirota v HA že {days} dni (uradno)',
+    reason_unavailable_days: 'Nedostopno že {days} dni',
+    health_offline_now: '🔴 Trenutno offline (nedostopno/neznano)',
+    health_reconnect_7d: '📶 {n}× izguba povezave v 7 dneh — preverite signal',
+    health_unstable_7d: '🔌 Nestabilno: {n}× nedostopno v 7 dneh',
+    health_normal: '✅ Deluje normalno',
+    errConnectHA: 'Povezava s HA ni mogoča. Panel mora biti odprt v stranski vrstici HA.',
+    ingressMode: '⚠️ Način Trusted / Ingress',
+    failedSuffix: 'neuspelo',
+    healthOfflineBadge: 'OFFLINE',
+    healthReconnects7d: '{n}× / 7 dni',
+    healthReconnectsToday: '{n}× danes',
+    healthMoreDevices: 'in še {n} naprav',
+    healthConfigEntry: 'Konfiguracijski vnos',
+    healthConfigEntryErr: 'Napake konfiguracijskih vnosov',
+    healthConfigFailed: '{failed} neuspelo, {retrying} v ponovnem poskusu',
+    recorderLoading: 'Poizvedovanje baze snemalnika...',
+    healthBdConnectivity: 'Ponovne povezave (7 dni)',
+    healthBdConnectivityDetail: '{n}× / {m} entitet',
+    healthBdOffline: 'Trenutno offline',
+    healthBdOfflineDetail: '{n} entitet zdaj',
+    healthBdSpike: 'Skok danes',
+    healthBdSpikeDetail: '{n} nenavadnih entitet',
+    healthProblemDevicesTitle: '🔍 Naprave s težavami ({n})',},
 
   zh: {
     appTitle: '🧹 HA Optimizer',
@@ -8328,7 +8685,7 @@ const I18N = {
     gaugeClean: '系统很干净 ✨',
     modalHardDeleteTitle: '❌ 确认彻底删除',
     modalSoftDeleteTitle: '🗑️ 禁用实体',
-    modalHardDeleteDesc: (n) => `你即将<strong>彻底删除</strong> ${n} 个实体。此操作<strong>无法撤销</strong>!`,
+    modalHardDeleteDesc: (n) => `你即将彻底删除 ${n} 个实体。此操作无法撤销!`,
     modalSoftDeleteDesc: (n) => `你即将禁用 ${n} 个实体。它们会从系统中隐藏,之后自动删除。`,
     usedInLabel: '被引用于',
     confirmHardDelete: (id) => `彻底删除 ${id}?\n此操作无法撤销。`,
@@ -8592,8 +8949,31 @@ const I18N = {
     addonStarted: (slug) => `已启动 ${slug}`,
     addonStopped2: (slug) => `已停止 ${slug}`,
     addonErrorTitle: '无法加载插件数据',
-    addonErrorDesc: '需要 <strong>Home Assistant OS</strong> 或 <strong>Supervised</strong>。<br>HA Container / Core 没有 Supervisor API。'
-  },};
+    addonErrorDesc: '需要 <strong>Home Assistant OS</strong> 或 <strong>Supervised</strong>。<br>HA Container / Core 没有 Supervisor API。',
+  
+    reason_orphaned_official: 'HA 已标记为孤立 {days} 天(官方字段)',
+    reason_unavailable_days: '已不可用 {days} 天',
+    health_offline_now: '🔴 当前离线(不可用/未知)',
+    health_reconnect_7d: '📶 7 天内掉线 {n} 次 —— 请检查信号',
+    health_unstable_7d: '🔌 不稳定:7 天内 {n} 次变为不可用',
+    health_normal: '✅ 运行正常',
+    errConnectHA: '无法连接 HA。面板必须从 HA 侧边栏打开。',
+    ingressMode: '⚠️ Trusted / Ingress 模式',
+    failedSuffix: '个失败',
+    healthOfflineBadge: '离线',
+    healthReconnects7d: '{n}× / 7 天',
+    healthReconnectsToday: '{n}× 今天',
+    healthMoreDevices: '和另外 {n} 个设备',
+    healthConfigEntry: '配置项',
+    healthConfigEntryErr: '配置项出错',
+    healthConfigFailed: '{failed} 个失败, {retrying} 个重试中',
+    healthBdConnectivity: '7 天掉线',
+    healthBdConnectivityDetail: '{n} 次 / {m} 个实体',
+    healthBdOffline: '当前离线',
+    healthBdOfflineDetail: '目前 {n} 个实体',
+    healthBdSpike: '今天尖峰',
+    healthBdSpikeDetail: '{n} 个异常实体',
+    healthProblemDevicesTitle: '🔍 问题设备({n})',},};
 
 let currentLang = 'vi';
 
@@ -8606,6 +8986,22 @@ function t(key, params) {
   }
   return val;
 }
+
+/**
+ * Extract the i18n key from a backend value without translating it.
+ * The backend may send either a bare key string or a {key, params} object,
+ * so filtering on rendered text is not possible across all 13 languages —
+ * always filter on this instead.
+ */
+function _i18nKeyOf(val) {
+  if (typeof val === 'string') return val;
+  if (val && typeof val === 'object' && typeof val.key === 'string') return val.key;
+  return '';
+}
+
+// Diagnosis entries rendered elsewhere (they carry their own presentation),
+// so they are skipped in the per-device tag row.
+const _HIDDEN_DIAG_KEYS = new Set(['health_normal', 'health_battery_critical', 'health_battery_low']);
 
 /**
  * Render a value that may be:
