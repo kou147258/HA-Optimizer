@@ -253,17 +253,19 @@
   }
   .ticker-text {
     display: inline-block;
-    animation: tickerScroll 60s linear infinite;
     font-size: 0.85rem;
     color: #c4b5fd;
-    padding-left: 100%;
+    /* The marquee is gone on purpose. It scrolled this warning across the top
+       of the panel every 60 seconds, forever, and the first thing anyone
+       reported was "the screen keeps flickering" - which is what a permanently
+       moving strip of text looks like when you are sitting and staring at the
+       panel while a delete confirmation waits for an answer. A warning you
+       cannot read is not a warning. It also has to live inside an iframe
+       inside the HA frontend, where it is on screen the entire time. */
+    margin-left: 14px;
   }
   .ticker-text strong { color: #fbbf24; }
   .ticker-text .support { color: #86efac; }
-  @keyframes tickerScroll {
-    0%   { transform: translateX(0); }
-    100% { transform: translateX(-100%); }
-  }
 
   /* LAST UPDATE BAR */
   .last-update-bar {
@@ -278,16 +280,27 @@
     color: var(--text-muted);
     flex-wrap: wrap;
   }
-  .last-update-bar .dot {
+  /* The "last scan" dot does not blink. It used to pulse every 2 seconds,
+   * forever, on a panel that is on screen for as long as anyone is looking at
+   * it - and blinking is exactly what gets reported as "the screen keeps
+   * flickering". A solid dot says the same thing: the data is live. */
+  .last-update-bar .dot,
+  .live-dot {
     width: 7px; height: 7px;
     border-radius: 50%;
     background: var(--success);
     display: inline-block;
-    animation: pulse 2s infinite;
   }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50%       { opacity: 0.3; }
+
+  /* Nothing on this panel loops forever. It lives inside an iframe that is
+     visible for as long as anyone is looking at it, so an "infinite" animation
+     is not a flourish, it is permanent movement. One-shot animations - the
+     spinner while loading, the toast sliding in - are fine and stay. */
+  @media (prefers-reduced-motion: reduce) {
+    .spinner,
+    .toast {
+      animation: none !important;
+    }
   }
 
   /* TOPBAR */
@@ -1144,7 +1157,7 @@
           <div class="stat-card" style="padding:16px; display:flex; flex-direction:column; gap:6px">
             <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.06em" data-i18n="kpiLastScan">Last Scan</div>
             <div style="display:flex; align-items:center; gap:6px; margin-top:4px">
-              <span class="dot" style="width:7px;height:7px;border-radius:50%;background:var(--success);display:inline-block;animation:pulse 2s infinite;flex-shrink:0"></span>
+              <span class="dot live-dot" style="width:7px;height:7px;border-radius:50%;background:var(--success);display:inline-block;flex-shrink:0"></span>
               <span id="lastUpdateTime" style="font-size:0.82rem; font-weight:600; color:var(--text)">--</span>
             </div>
             <div style="font-size:0.72rem; color:var(--text-muted)" id="lastUpdateTotal">--</div>
@@ -2105,8 +2118,13 @@ function renderTable() {
       ? `<span class="state-badge ${r.disabled ? 'off' : 'on'}" title="${r.disabled ? t('stateDisabledTitle') : t('stateEnabledTitle')}">${r.disabled ? '⛔ ' + t('badgeDisabled') : '✅ ' + t('badgeEnabled')}</span>`
       : '';
 
+    // The row checkbox gets an id and autocomplete="off": a control with
+    // neither is flagged by Chrome's Issues panel ("a form field element
+    // should have an id or name attribute"), and a row selector is not
+    // something the browser should ever try to autofill.
+    const selId = 'sel-' + r.entity_id.replace(/[^A-Za-z0-9_]/g, '_');
     return `<tr class="${isSelected ? 'selected' : ''}" data-id="${r.entity_id}">
-      <td class="cb-wrap"><input type="checkbox" ${isSelected ? 'checked' : ''} onchange="toggleSelect('${r.entity_id}', this)"></td>
+      <td class="cb-wrap"><input type="checkbox" id="${selId}" name="${selId}" autocomplete="off" ${isSelected ? 'checked' : ''} onchange="toggleSelect('${r.entity_id}', this)"></td>
       <td>
         <div style="display:flex; align-items:center; gap:6px">
           <div>
@@ -2153,11 +2171,25 @@ function sortBy(field) {
 // ================================================================
 // SELECTION
 // ================================================================
+/**
+ * Select or deselect one row. The checkbox is optional: every current caller
+ * passes it from the row's onchange, but reading `cb.checked` unguarded made
+ * this the first thing to break when the function was driven from anywhere
+ * else, and a TypeError here aborts before the selection bar is updated - so
+ * the checkbox appears to do nothing. Select from the entity id instead when
+ * no element is handed in.
+ */
 function toggleSelect(id, cb) {
-  if (cb.checked) selectedIds.add(id);
+  const on = cb ? cb.checked : !selectedIds.has(id);
+  if (on) selectedIds.add(id);
   else selectedIds.delete(id);
-  const row = cb.closest('tr');
-  row.classList.toggle('selected', cb.checked);
+  const row = document.querySelector(`#resultsBody tr[data-id="${CSS.escape(id)}"]`)
+           || (cb && cb.closest('tr'));
+  if (row) {
+    row.classList.toggle('selected', on);
+    const box = row.querySelector('input[type=checkbox]');
+    if (box) box.checked = on;
+  }
   updateSelectedBar();
   updateMasterCheck();
 }

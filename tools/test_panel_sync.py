@@ -305,6 +305,49 @@ for select_id in ("filterRisk", "filterCat", "filterYaml", "filterState"):
 check("no positional option labelling is left anywhere",
       "options].forEach((opt, i)" not in shell)
 
+# ═══ 4b. every form control is addressable ═════════════════════════════════
+# Chrome's Issues panel flagged "A form field element should have an id or name
+# attribute" on the per-row checkbox. Not a functional bug, but it is a hint
+# that something in the panel is anonymous, and the count in DevTools (4) is
+# the number of rendered rows - so it scales with the table, not with the
+# markup, and nobody would notice it in review.
+print("\nform controls")
+import re as _re  # noqa: E402
+controls = []
+for _tag in ("input", "select", "textarea"):
+    controls += list(_re.finditer(rf"<{_tag}\b[^>]*>", shell, _re.I))
+anonymous = [m for m in controls
+             if not _re.search(r"\sid\s*=", m.group(0))
+             and not _re.search(r"\sname\s*=", m.group(0))]
+check(f"every form control has an id or a name ({len(controls)} found)",
+      not anonymous,
+      f"{len(anonymous)} without either: "
+      + "; ".join(m.group(0)[:70] for m in anonymous[:3]))
+check("the row checkbox is explicitly excluded from autofill",
+      'autocomplete="off"' in shell)
+
+# ═══ 4c. nothing on the chrome loops forever ═══════════════════════════════
+# The user reported "the screen keeps flickering" when the delete confirmation
+# was open. Measured on the instance: the event loop is not blocked (probe
+# p50 3ms / max 4ms, identical idle and under load), and the whole scan ->
+# select -> modal flow runs in a real browser with zero console errors. What
+# was left was two permanent animations in the top strip: a 60s marquee and a
+# 2s blink, both `infinite`, neither gated on prefers-reduced-motion, on screen
+# for as long as anyone is looking at the panel.
+print("\nno permanent motion on the chrome")
+infinite = [m.group(0).replace("\n", " ") for m in _re.finditer(r"animation:[^;}]*infinite", shell)]
+allowed = [a for a in infinite if "spin" in a]   # the spinner only runs while loading
+stray = [a for a in infinite if a not in allowed]
+check("no infinite animation on anything that is always visible",
+      not stray, f"stray: {stray}")
+check("the only infinite animation left is the loading spinner",
+      len(allowed) == 1, f"found {len(allowed)}")
+check("the backup warning no longer scrolls",
+      "tickerScroll" not in shell,
+      "a warning that moves is a warning you cannot read")
+check("motion is opt-out for anyone who asked for reduced motion",
+      "prefers-reduced-motion" in shell and ".live-dot" in shell)
+
 # ═══ 5. no hardcoded upstream locale in printed timestamps ═════════════════
 # Two timestamps were formatted with toLocaleString('vi-VN'), upstream's source
 # language, so a Chinese or English user was shown upstream's date conventions
