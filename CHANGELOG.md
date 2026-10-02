@@ -7,14 +7,22 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ---
 
-## [1.3.0] - 2026-10-02
+## [1.4.0] - 2026-10-02
+
+This release supersedes the earlier `1.3.0` tag, which was pushed before the
+i18n completion work, the panel-language change and the purge-safety fixes
+landed. Nothing from 1.3.0 is lost; 1.4.0 is everything plus the rest.
 
 ### Added
-- 🇨🇳 **简体中文 (zh-CN)** — full translation of all 380 UI keys, added as the 13th interface language. Covers every label, button, message, placeholder, theme description, card-type description and fingerprint metric, including the 25 parameterised (`(n) => ...`) entries.
-- 🔧 **`tools/check_i18n.py`** — dependency-free guard that fails when a language drifts from the `en` reference (missing/extra keys, mismatched `{placeholders}` or HTML tags, backend keys no dictionary defines, `t()` call sites with unknown keys). Wired into CI as the `i18n Consistency` job and as a release gate.
+- 🇨🇳 **简体中文 (zh-CN)** — full translation, added as the 13th interface language. The dictionary now carries 422 keys, identical across all 13 languages, with matching `{placeholders}` and HTML tags.
+- 🗣️ **The panel follows Home Assistant's own language.** It used to open in Vietnamese no matter what HA was set to. An explicit choice in the language menu still wins; with nothing stored, it reads `hass.language` and maps it onto a translation, falling back to English. Retried once shortly after load, because the parent document may not expose `<home-assistant>` at `DOMContentLoaded`.
+- 🗑️ **The donate button is removed**, along with its CSS and its per-language re-apply.
+- 🔧 **`tools/check_i18n.py`** — fails on key drift, on a `dashLbl*` family that has drifted into another language, on a key repeated inside a block (the last definition silently wins), and on prose that carries Vietnamese diacritics without `data-i18n` or `t()`.
+- 🔧 **`tools/check_version.py`** — fails when the four places that state the version disagree.
+- 🔁 **`tools/test_purge_safety.py`** — 17 checks covering the delete path, runnable without Home Assistant. A reverse test re-introduces each of the six original defects and confirms the suite goes red for every one.
 
 ### Fixed
-- 🏷️ **Version numbers now agree.** `manifest.json` said `1.2.2` while `const.py` and both READMEs still said `1.0.0`, so the sidebar and the docs could not be reconciled with what HACS installs. All four now read `1.3.0`. (The `1.0.0` release date in this changelog was also a year off — v1.0 was published 2026-04-21, not 2025-04-19 — and is corrected.)
+- 🏷️ **Version numbers now agree.** `manifest.json` said `1.2.2` while `const.py` and both READMEs still said `1.0.0`, so the sidebar and the docs could not be reconciled with what HACS installs. All four are maintained by `tools/check_version.py` now. (The `1.0.0` release date in this changelog was also a year off — v1.0 was published 2026-04-21, not 2025-04-19 — and is corrected.)
 - 🔴 **The automatic trash expiry no longer deletes silently.** It runs unattended every 6 hours and hard-deletes anything soft-deleted longer than the configured window, irreversibly, and the only trace was one `info` log line. Every batch is now logged at warning level, raised as a persistent notification listing what went, and announced on the event bus. Entities the engine could not actually remove stay in the trash records instead of becoming untracked ghosts.
 - 🔴 **The purge engine now refuses every safety device class.** `purge_engine.py` carried a second, hand-maintained copy of `SAFETY_DEVICE_CLASSES` that had drifted: it was missing `door`, `window`, `motion`, `occupancy`, `vibration` and `sound`. The scanner never suggested deleting those, but the layer that actually performs the deletion would have. Both now read the single definition in `const.py`.
 - 🟠 **A failed automation/script hard delete is no longer reported as a success.** The fallback path disabled the entity and returned `True`, so the UI showed a completed delete for an entity that was still there — and because it was not added to the trash, nothing would ever restore or finish it. The function now returns an explicit `removed` / `disabled` / `not_found` status, failures land in a new `disabled_only` bucket, and the purge service keeps them tracked. Deletion now resolves the owning config entry through the entity registry instead of matching an entity-id slug against `unique_id`/`entry_id`, and the two dead `hass.data["automation_storage"]` / `hass.data["script_storage"]` lookups (keys that do not exist in Home Assistant, with unused imports) are gone.
