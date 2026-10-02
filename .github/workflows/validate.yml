@@ -38,6 +38,14 @@ jobs:
       - name: Trash bulk-operation regression tests
         run: python3 tools/test_trash_bulk.py
 
+      - name: UI label and control-naming checks
+        run: python3 tools/test_ui_labels.py
+
+      # Proves the suite above can still fail: each defect the 1.7.2 UI audit
+      # found is injected into a copy of the panel and must be caught.
+      - name: UI label checks can still fail
+        run: node tools/counterproof_ui_labels.js
+
       - name: Compatibility claim checks
         run: python3 tools/test_compat_claims.py
 

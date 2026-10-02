@@ -19,11 +19,32 @@ had gone untested for five releases, which is why it survived.
 - 🧹 **`restore_all` and `empty_trash` had the same silence** — introduced in 1.7.0, also missing from the panel's response set. Their toasts never fired either.
 - 👻 **A restore no longer reports success for an entity that no longer exists.** `async_restore_entity` answers success / "nothing to restore" both when an entity is present and already enabled *and* when it has quietly left the registry — a hard delete removes the automation's config entry and the entity goes with it. `restore_all` believed that, dropped the trash record, and erased the only trace of what had happened. A `_verified_restore` helper re-checks the registry before accepting "nothing to do".
 
+### Fixed — interface audit
+A pass over every control in the panel, cross-checking each rendered label against
+the dictionary and the handler it calls. Six defects, none of which threw an error.
+
+- ☑️ **One button showed its emoji twice: `☑️ ☑️ 全选`.** Its label lived in two places — a glyph in the static markup *and* the same glyph inside the dictionary value — and a second render pass settles the tie. That pass skips disabled controls, and this is the only one of the nine that starts disabled, so it alone kept both copies. Eight sibling buttons looked correct, which is what made it hard to see. The rule is now structural: an element carries a glyph **or** a dictionary value, never both. Applied to 18 controls.
+- ⚠️ **The backup warning was printed twice across the top of the panel.** The strip used to be a marquee that repeated its text to loop seamlessly; removing the animation in 1.7.1 left the repeat behind. A duplicated safety warning is worse than none, because it reads as emphasis rather than as a bug.
+- 🌐 **Hardcoded English inside the Chinese interface:** the recorder's **📋 Copy** button and its **✅ Copied!** toast, plus five tooltips that `t()` could never reach — a literal `title="…"` is not element content, so the translation pass walked straight past it. New `data-i18n-title` hook; two already-present dictionary entries (`themeLabel`, `langLabel`) were simply never wired to anything.
+- ♻️ **A doubled glyph in the restore toast** (`♻️ ♻️ 恢复: sensor.x`), from the same two-owners mistake in a third shape: a template literal.
+- 🗑️ **The trash can meant opposite things on one screen.** It marked **禁用** (recoverable — the entity moves to the trash) and **清空回收站** (irreversible) alike, so the most destructive-looking glyph on the page was attached to the safe action half the time. Disable is now ⏸️.
+- 💬 **「禁用」 did not say what it does.** The entities land in the trash and are auto-purged after a while, and the button said only "Disable". It now reads **禁用 → 回收站** / **Disable → Trash** and carries a tooltip; the irreversible button beside it got one too.
+
 ### Verified on a live instance
 Reproduced end to end, then fixed. Measured alongside it: the event loop is
 never held (probe p50 3 ms / max 4 ms, identical idle and under a 2.3 s
 `analyze_addons`), and the scan → select → modal flow runs in a real browser
 with zero console errors.
+
+The interface audit was verified the same way rather than by reading the source:
+the panel was rendered in a browser, and the old build reproduced the doubled
+`☑️ ☑️ 全选` and the English `Theme` tooltip on its own, before the fix replaced
+both. Both now read `☑️ 全选` and 「选择主题」 in the live DOM.
+
+A new guard suite (`tools/test_ui_labels.py`, 29 checks) pins each class of
+defect above, and `tools/counterproof_ui_labels.js` injects all nine back into a
+copy of the panel to prove the suite can still fail. A guard that has never been
+seen red is indistinguishable from one that checks nothing.
 
 > While reproducing this, the two test automations on that instance were lost:
 > a soft delete followed by a hard delete, and the hard delete removed the

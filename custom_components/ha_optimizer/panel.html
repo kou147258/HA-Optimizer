@@ -925,10 +925,8 @@
     &nbsp;&nbsp;&nbsp;&nbsp;★&nbsp;&nbsp;&nbsp;&nbsp;
     💜&nbsp;&nbsp;<span class="support">If this tool is helpful, please <strong>support the project</strong> to keep new features coming!</span>
     &nbsp;&nbsp;&nbsp;&nbsp;★&nbsp;&nbsp;&nbsp;&nbsp;
-    ⚠️&nbsp;&nbsp;<strong>Backup</strong> your HA before Scan &amp; Purge — hard deletes cannot be undone!
-    &nbsp;&nbsp;&nbsp;&nbsp;★&nbsp;&nbsp;&nbsp;&nbsp;
     🌟&nbsp;&nbsp;<span class="support">Like it? Please <strong>⭐ Star on GitHub</strong> and share with the Home Assistant community!</span>
-    &nbsp;&nbsp;&nbsp;&nbsp;★&nbsp;&nbsp;&nbsp;&nbsp;
+    &nbsp;&nbsp;&nbsp;&nbsp;
   </span>
 </div>
 
@@ -938,7 +936,7 @@
   <div class="topbar-controls">
   <!-- THEME DROPDOWN -->
   <div class="theme-dropdown-wrap" id="themeDropdownWrap">
-    <button class="theme-dropdown-btn" id="themeDropdownBtn" onclick="toggleThemeMenu()" title="Theme">
+    <button class="theme-dropdown-btn" id="themeDropdownBtn" onclick="toggleThemeMenu()" data-i18n-title="themeLabel" title="Choose theme">
       🎨
       <div class="swatch" id="themeCurrentSwatch" style="background:linear-gradient(135deg,#111827,#03a9f4)"></div>
       <span id="themeCurrentName">Deep Space</span>
@@ -947,7 +945,7 @@
   </div>
   <!-- LANGUAGE DROPDOWN -->
   <div class="lang-dropdown-wrap" id="langDropdownWrap">
-    <button class="lang-dropdown-btn" id="langDropdownBtn" onclick="toggleLangMenu()" title="Language">
+    <button class="lang-dropdown-btn" id="langDropdownBtn" onclick="toggleLangMenu()" data-i18n-title="langLabel" title="Language">
       <span id="langCurrentFlag">🇬🇧</span>
       <span id="langCurrentName">English</span>
       <span class="arrow">▾</span>
@@ -1060,15 +1058,15 @@
   </style>
 
   <div class="tabs">
-    <div class="tab active" onclick="switchTab('scan')">📋 <span data-i18n="tabScan">📋 Overview Scan</span></div>
-    <div class="tab" onclick="switchTab('recorder')">📊 <span data-i18n="tabRecorder">📊 Recorder</span></div>
-    <div class="tab" onclick="switchTab('dashboard')">🖥️ <span data-i18n="tabDashboard">🖥️ Dashboard</span></div>
-    <div class="tab" onclick="switchTab('storms')">⚡ <span data-i18n="tabStorms">⚡ State Storm</span></div>
-    <div class="tab" onclick="switchTab('deadcode')">🔍 <span data-i18n="tabDeadcode">🔍 Dead Code</span></div>
-    <div class="tab" onclick="switchTab('health')">💚 <span data-i18n="tabHealth">💚 Health</span></div>
-    <div class="tab" onclick="switchTab('fingerprint')">🫆 <span data-i18n="tabFingerprint">🫆 Fingerprint</span></div>
-    <div class="tab" onclick="switchTab('addon')">🧩 <span data-i18n="tabAddon">🧩 Add-ons</span></div>
-    <div class="tab" onclick="switchTab('soft')">🗑️ <span data-i18n="tabSoft">🗑️ Trash</span></div>
+    <div class="tab active" onclick="switchTab('scan')"><span data-i18n="tabScan">📋 Overview Scan</span></div>
+    <div class="tab" onclick="switchTab('recorder')"><span data-i18n="tabRecorder">📊 Recorder</span></div>
+    <div class="tab" onclick="switchTab('dashboard')"><span data-i18n="tabDashboard">🖥️ Dashboard</span></div>
+    <div class="tab" onclick="switchTab('storms')"><span data-i18n="tabStorms">⚡ State Storm</span></div>
+    <div class="tab" onclick="switchTab('deadcode')"><span data-i18n="tabDeadcode">🔍 Dead Code</span></div>
+    <div class="tab" onclick="switchTab('health')"><span data-i18n="tabHealth">💚 Health</span></div>
+    <div class="tab" onclick="switchTab('fingerprint')"><span data-i18n="tabFingerprint">🫆 Fingerprint</span></div>
+    <div class="tab" onclick="switchTab('addon')"><span data-i18n="tabAddon">🧩 Add-ons</span></div>
+    <div class="tab" onclick="switchTab('soft')"><span data-i18n="tabSoft">🗑️ Trash</span></div>
   </div>
 
   <!-- SCAN TAB -->
@@ -1189,7 +1187,7 @@
 
     <div class="toolbar">
       <button class="btn btn-primary" onclick="triggerScan()" id="btnScan">
-        🔍 <span data-i18n="btnScan">🔍 Start Scan</span>
+        <span data-i18n="btnScan">🔍 Start Scan</span>
       </button>
       <div class="filter-row">
         <input class="search-input" type="search" placeholder="..." id="searchInput" oninput="applyFilters()">
@@ -1217,7 +1215,7 @@
           <option value="disabled" data-i18n="filterDisabled">Disabled</option>
         </select>
       </div>
-      <button class="btn btn-ghost" onclick="selectAll()" id="btnSelectAll" disabled>☑️ <span data-i18n="btnSelectAll">☑️ Select All</span></button>
+      <button class="btn btn-ghost" onclick="selectAll()" id="btnSelectAll" disabled><span data-i18n="btnSelectAll">☑️ Select All</span></button>
     </div>
 
     <div class="table-wrap">
@@ -1264,7 +1262,7 @@
       <table>
         <thead>
           <tr>
-            <th>Entity ID</th>
+            <th data-i18n="thEntityId">Entity ID</th>
             <th data-i18n="thDisabledAt">Disabled At</th>
             <th data-i18n="thExpiresIn">Auto-purge in</th>
             <th data-i18n="thAction">Action</th>
@@ -1281,7 +1279,7 @@
   <div id="tabRecorder" style="display:none">
     <div class="toolbar" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px">
       <button class="btn btn-primary" onclick="triggerRecorderAnalysis()" id="btnRecorder">
-        📊 <span data-i18n="btnRecorder">📊 Analyze Recorder</span>
+        <span data-i18n="btnRecorder">📊 Analyze Recorder</span>
       </button>
       <span style="color:var(--text-muted); font-size:0.85rem" id="recorderDescSpan" data-i18n="recorderDesc">Query DB → Find top writers → Suggest exclude + commit_interval</span>
     </div>
@@ -1294,7 +1292,7 @@
   <div id="tabDashboard" style="display:none">
     <div class="toolbar" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px">
       <button class="btn btn-primary" onclick="triggerDashboardAnalysis()" id="btnDashboard">
-        🖥️ <span data-i18n="btnDashboard">🖥️ Analyze Dashboard</span>
+        <span data-i18n="btnDashboard">🖥️ Analyze Dashboard</span>
       </button>
       <span style="color:var(--text-muted); font-size:0.85rem" id="dashboardDescSpan" data-i18n="dashboardDesc">Read .storage/lovelace → Heavy cards → Missing entities</span>
     </div>
@@ -1306,7 +1304,7 @@
   <!-- STATE STORM TAB -->
   <div id="tabStorms" style="display:none">
     <div class="toolbar" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px">
-      <button class="btn btn-primary" onclick="triggerStormAnalysis()" id="btnStorms">⚡ <span data-i18n="btnStorms">⚡ Detect State Storms</span><orm</button>
+      <button class="btn btn-primary" onclick="triggerStormAnalysis()" id="btnStorms"><span data-i18n="btnStorms">⚡ Detect State Storms</span><orm</button>
       <span style="color:var(--text-muted); font-size:0.85rem" id="stormsDescSpan" data-i18n="stormsDesc">Find abnormally frequent state updates → root cause of DB bloat & browser lag</span>
     </div>
     <div id="stormsContent"><div class="empty-state"><div class="icon">⚡</div><h3 data-i18n="noData">No data yet</h3><p data-i18n="clickToStart2">Click the button to start analysis.</p></div></div>
@@ -1315,7 +1313,7 @@
   <!-- DEAD CODE TAB -->
   <div id="tabDeadcode" style="display:none">
     <div class="toolbar" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px">
-      <button class="btn btn-primary" onclick="triggerDeadCodeAnalysis()" id="btnDeadcode">🔍 <span data-i18n="btnDeadcode">🔍 Analyze Dead Code</span><d Code</button>
+      <button class="btn btn-primary" onclick="triggerDeadCodeAnalysis()" id="btnDeadcode"><span data-i18n="btnDeadcode">🔍 Analyze Dead Code</span><d Code</button>
       <span style="color:var(--text-muted); font-size:0.85rem" id="deadcodeDescSpan" data-i18n="deadcodeDesc">Find automations with broken triggers, actions or conditions</span>
     </div>
     <div id="deadcodeContent"><div class="empty-state"><div class="icon">🔍</div><h3 data-i18n="noData">No data yet</h3><p data-i18n="clickToStart2">Click the button to start analysis.</p></div></div>
@@ -1324,7 +1322,7 @@
   <!-- INTEGRATION HEALTH TAB -->
   <div id="tabHealth" style="display:none">
     <div class="toolbar" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px">
-      <button class="btn btn-primary" onclick="triggerHealthAnalysis()" id="btnHealth">💚 <span data-i18n="btnHealth">💚 Check Integration Health</span><ion Health</button>
+      <button class="btn btn-primary" onclick="triggerHealthAnalysis()" id="btnHealth"><span data-i18n="btnHealth">💚 Check Integration Health</span><ion Health</button>
       <span style="color:var(--text-muted); font-size:0.85rem" id="healthDescSpan" data-i18n="healthDesc">Analyze reconnects, weak battery, signal issues per integration</span>
     </div>
     <div id="healthContent"><div class="empty-state"><div class="icon">💚</div><h3 data-i18n="noData">No data yet</h3><p data-i18n="clickToStart2">Click the button to start analysis.</p></div></div>
@@ -1334,8 +1332,8 @@
   <div id="tabFingerprint" style="display:none">
     <div class="toolbar" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px">
       <div style="display:flex; gap:10px; flex-wrap:wrap">
-        <button class="btn btn-primary" onclick="triggerFingerprintAnalysis()" id="btnFingerprint">🫆 <span data-i18n="btnFingerprint">🫆 Analyze Fingerprint</span><ch Fingerprint</button>
-        <button class="btn btn-ghost" onclick="triggerCollectBaseline()" id="btnCollectBaseline" title="Collect baseline — saves yesterday's data">📥 <span data-i18n="btnCollectBaseline">📥 Collect Baseline</span></button>
+        <button class="btn btn-primary" onclick="triggerFingerprintAnalysis()" id="btnFingerprint"><span data-i18n="btnFingerprint">🫆 Analyze Fingerprint</span><ch Fingerprint</button>
+        <button class="btn btn-ghost" onclick="triggerCollectBaseline()" id="btnCollectBaseline" data-i18n-title="btnCollectBaselineTitle" title="Collect baseline — saves yesterday's data"><span data-i18n="btnCollectBaseline">📥 Collect Baseline</span></button>
       </div>
       <div style="font-size:0.82rem; color:var(--text-muted); max-width:400px; line-height:1.5" id="fingerprintDescDiv">
         <span data-i18n="fingerprintDesc">Compare HA today with <strong>its own past</strong> — detect anomalies in writes, triggers, reconnects.</span>
@@ -1371,10 +1369,10 @@
 </div>
 <div class="selected-bar" id="selectedBar" style="display:none">
   <span id="selectedCount">0 <span data-i18n="selectedSuffix">selected</span></span>
-  <button class="btn btn-warning" onclick="showPurgeModal(false)" style="padding:7px 16px">
-    🗑️ <span data-i18n="btnDisableTxt">Disable</span>
+  <button class="btn btn-warning" onclick="showPurgeModal(false)" data-i18n-title="btnDisableTxtTitle" title="Disable" style="padding:7px 16px">
+    ⏸️ <span data-i18n="btnDisableTxt">Disable</span>
   </button>
-  <button class="btn btn-danger" onclick="showPurgeModal(true)" style="padding:7px 16px">
+  <button class="btn btn-danger" onclick="showPurgeModal(true)" data-i18n-title="btnDeleteTxtTitle" title="Hard Delete" style="padding:7px 16px">
     ❌ <span data-i18n="btnDeleteTxt">Hard Delete</span>
   </button>
   <button class="btn btn-ghost" onclick="clearSelection()" style="padding:7px 16px">
@@ -2569,7 +2567,7 @@ async function restoreEntity(id, btn) {
     }
 
     if (result.re_enabled) {
-      toast('success', `♻️ ${t('softRestoreBtn')}: ${id}`);
+      toast('success', `${t('softRestoreBtn')}: ${id}`);
     } else {
       toast('info', `ℹ️ ${id} → ${t('emptyTrash')}`);
     }
@@ -2743,8 +2741,8 @@ function renderRecorderResults(d, ts) {
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
         <h3 style="font-size:1rem">📋 ${t('recorderYamlSuggestion')}</h3>
         <button class="btn btn-ghost" style="padding:5px 14px; font-size:0.82rem"
-          onclick="navigator.clipboard.writeText(document.getElementById('yamlSuggestion').textContent).then(()=>toast('success','✅ Copied!'))">
-          📋 Copy
+          onclick="navigator.clipboard.writeText(document.getElementById('yamlSuggestion').textContent).then(()=>toast('success', t('copiedYaml')))">
+          ${t('copyYaml')}
         </button>
       </div>
       <pre id="yamlSuggestion" style="background:var(--surface2); padding:16px; border-radius:8px;
@@ -2923,7 +2921,7 @@ function renderDashboardResults(d, ts) {
           <span onclick="haNavigate('/config/entities?search=${encodeURIComponent(eid)}')"
             style="background:rgba(244,67,54,0.1); color:var(--danger); padding:3px 9px; border-radius:5px;
                    font-family:monospace; font-size:0.78rem; border:1px solid rgba(244,67,54,0.3); cursor:pointer"
-            title="Entity Registry">${eid}</span>`).join('')}
+            data-i18n-title="entityRegistryTitle" title="Entity Registry">${eid}</span>`).join('')}
       </div>
     </div>`;
   }
@@ -2938,7 +2936,7 @@ function renderDashboardResults(d, ts) {
           <span onclick="haNavigate('/config/entities?search=${encodeURIComponent(eid)}')"
             style="background:rgba(255,152,0,0.1); color:var(--warning); padding:3px 9px; border-radius:5px;
                    font-family:monospace; font-size:0.78rem; border:1px solid rgba(255,152,0,0.3); cursor:pointer"
-            title="Entity Registry">${eid}</span>`).join('')}
+            data-i18n-title="entityRegistryTitle" title="Entity Registry">${eid}</span>`).join('')}
       </div>
     </div>`;
   }
@@ -3884,7 +3882,7 @@ const I18N = {
     btnHealth: '💚 Check Integration Health',
     btnFingerprint: '🫆 Analyze Fingerprint',
     btnCollectBaseline: '📥 Collect Baseline',
-    btnDisable: '🗑️ Disable',
+    btnDisable: '⏸️ Disable',
     btnDelete: '❌ Hard Delete',
     btnCancel: '✕ Deselect',
     btnRestore: '♻️ Restore',
@@ -3987,7 +3985,7 @@ const I18N = {
     clickToStart2: 'Click the button to start analysis.',
     impactAnalysis: 'Impact Analysis:',
     selectedSuffix: 'selected',
-    btnDisableTxt: 'Disable',
+    btnDisableTxt: 'Disable → Trash',
     btnDeleteTxt: 'Hard Delete',
     btnCancelTxt: 'Deselect',
     fingerprintNoDataTitle: 'No Fingerprint Data Yet',
@@ -3997,7 +3995,7 @@ const I18N = {
     impactNote: '⚡ Impact Analysis:',
     gaugeGood: 'Good', gaugeAvg: 'Average', gaugePoor: 'Needs Attention',
     gaugeNeedReview: 'entities to review', gaugeClean: 'System is clean ✨',
-    modalHardDeleteTitle: '❌ Confirm Hard Delete', modalSoftDeleteTitle: '🗑️ Disable Entities',
+    modalHardDeleteTitle: '❌ Confirm Hard Delete', modalSoftDeleteTitle: '⏸️ Disable Entities',
     modalHardDeleteDesc: (n) => `You are about to PERMANENTLY DELETE ${n} entities. This action CANNOT be undone!`,
     modalSoftDeleteDesc: (n) => `You are about to disable ${n} entities. They will be hidden from the system and auto-deleted later.`,
     usedInLabel: 'is used in',
@@ -4015,6 +4013,13 @@ const I18N = {
     recorderWasteful: 'High writes but unchanging value (30 days)',
     recorderValues: 'Values', recorderTypes: 'types', recorderByDomain: 'Records by Domain',
     recorderYamlSuggestion: 'YAML suggestion for configuration.yaml',
+      copyYaml: '📋 Copy',
+      copiedYaml: '✅ Copied!',
+      btnCollectBaselineTitle: "Collect baseline — saves yesterday's data",
+      entityRegistryTitle: 'Entity Registry',
+      thEntityId: 'Entity ID',
+      btnDisableTxtTitle: 'Disable — the entities go to Trash and stay recoverable until auto-purge',
+      btnDeleteTxtTitle: 'Hard Delete — this cannot be undone',
     recorderNoSuggestion: '# No suggestion available',
     recorderYamlHint: 'Copy the YAML above into <strong>configuration.yaml</strong>, then restart Home Assistant.',
     dashboardLoading: 'Reading Lovelace config...', dashboardDone: 'Dashboard analysis complete!',
@@ -4329,7 +4334,7 @@ const I18N = {
     btnHealth: '💚 检查集成健康度',
     btnFingerprint: '🫆 分析指纹',
     btnCollectBaseline: '📥 采集基线',
-    btnDisable: '🗑️ 禁用',
+    btnDisable: '⏸️ 禁用',
     btnDelete: '❌ 彻底删除',
     btnCancel: '✕ 取消选择',
     btnRestore: '♻️ 恢复',
@@ -4432,7 +4437,7 @@ const I18N = {
     clickToStart2: '点击按钮开始分析。',
     impactAnalysis: '影响分析:',
     selectedSuffix: '已选',
-    btnDisableTxt: '禁用',
+    btnDisableTxt: '禁用 → 回收站',
     btnDeleteTxt: '彻底删除',
     btnCancelTxt: '取消选择',
     fingerprintNoDataTitle: '暂无指纹数据',
@@ -4446,7 +4451,7 @@ const I18N = {
     gaugeNeedReview: '个实体待处理',
     gaugeClean: '系统很干净 ✨',
     modalHardDeleteTitle: '❌ 确认彻底删除',
-    modalSoftDeleteTitle: '🗑️ 禁用实体',
+    modalSoftDeleteTitle: '⏸️ 禁用实体',
     modalHardDeleteDesc: (n) => `你即将彻底删除 ${n} 个实体。此操作无法撤销!`,
     modalSoftDeleteDesc: (n) => `你即将禁用 ${n} 个实体。它们会从系统中隐藏,之后自动删除。`,
     usedInLabel: '被引用于',
@@ -4473,6 +4478,13 @@ const I18N = {
     recorderTypes: '种类型',
     recorderByDomain: '按域统计记录数',
     recorderYamlSuggestion: 'configuration.yaml 的 YAML 建议',
+      copyYaml: '📋 复制',
+      copiedYaml: '✅ 已复制',
+      btnCollectBaselineTitle: '采集基线 —— 保存昨天的数据',
+      entityRegistryTitle: '实体注册表',
+      thEntityId: '实体 ID',
+      btnDisableTxtTitle: '禁用 —— 实体进入回收站，自动清理前可随时恢复',
+      btnDeleteTxtTitle: '彻底删除 —— 此操作无法撤销',
     recorderNoSuggestion: '# 暂无可用建议',
     recorderYamlHint: '把上面的 YAML 复制到 <strong>configuration.yaml</strong>,然后重启 Home Assistant。',
     dashboardLoading: '正在读取 Lovelace 配置...',
@@ -4901,6 +4913,14 @@ function _applyTranslations() {
     }
   });
 
+  // A literal title="..." cannot be translated, and the auto pass above only
+  // touches element content. data-i18n-title is the hook for tooltips so no
+  // control has to ship a hardcoded English tooltip.
+  document.querySelectorAll('[data-i18n-title]').forEach(el => {
+    const key = el.getAttribute('data-i18n-title');
+    if (key) el.title = t(key);
+  });
+
   // ── Title
   const h1 = document.querySelector('.topbar h1');
   if (h1) h1.innerHTML = `<span class="icon">🧹</span> ${t('appTitle').replace('🧹 ', '')}`;
@@ -4909,15 +4929,16 @@ function _applyTranslations() {
 
   // ── Ticker
   const ticker = document.querySelector('.ticker-text');
+  // One pass, one copy of the backup warning. The strip used to be a marquee that
+  // repeated the text to make the loop seamless, so the backup warning appeared
+  // twice; once the animation was removed the repeat had to go with it.
   if (ticker) ticker.innerHTML = `
-    ⚠️&nbsp;&nbsp;${t('tickerBackup')}
+    ${t('tickerBackup')}
     &nbsp;&nbsp;&nbsp;&nbsp;★&nbsp;&nbsp;&nbsp;&nbsp;
     ${t('tickerSupport')}
     &nbsp;&nbsp;&nbsp;&nbsp;★&nbsp;&nbsp;&nbsp;&nbsp;
-    ⚠️&nbsp;&nbsp;${t('tickerBackup')}
-    &nbsp;&nbsp;&nbsp;&nbsp;★&nbsp;&nbsp;&nbsp;&nbsp;
     ${t('tickerStar')}
-    &nbsp;&nbsp;&nbsp;&nbsp;★&nbsp;&nbsp;&nbsp;&nbsp;
+    &nbsp;&nbsp;&nbsp;&nbsp;
   `;
 
   // ── Tabs
