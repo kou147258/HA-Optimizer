@@ -22,6 +22,31 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+
+async def _async_run_in_db_executor(
+    hass: HomeAssistant, target, *args
+) -> dict:
+    """Run a recorder-database query on the recorder's own executor.
+
+    Recorder DB access must not run on the event loop, and it should not use the
+    general-purpose executor either. Home Assistant detects that and logs
+    "Detected that custom integration 'ha_optimizer' accesses the database
+    without the database executor", and the query competes with the recorder's
+    own writes for the connection. `get_instance()` raises when recorder is not
+    set up, so catching here keeps the graceful degradation the per-query
+    try/except blocks already provide.
+
+    Only use this for recorder work. Plain filesystem scans (see
+    `_scan_references`) belong on `hass.async_add_executor_job`.
+    """
+    try:
+        from homeassistant.components.recorder import get_instance
+        return await get_instance(hass).async_add_executor_job(target, *args)
+    except Exception as exc:  # noqa: BLE001 - degrade, never break the caller
+        _LOGGER.warning("Recorder database unavailable, skipping: %s", exc)
+        return {}
+
+
 # Helper entity domains
 HELPER_DOMAINS = {
     "input_boolean", "input_number", "input_select", "input_text",
@@ -532,10 +557,10 @@ class DataScanner:
 
     async def _get_history_map(self) -> dict[str, datetime]:
         """Get last_changed for all entities from the recorder DB."""
-        return await self.hass.async_add_executor_job(self._query_history_all)
+        return await _async_run_in_db_executor(self.hass, self._query_history_all)
 
     async def _get_history_map_for_domain(self, domain: str) -> dict[str, datetime]:
-        return await self.hass.async_add_executor_job(self._query_history_domain, domain)
+        return await _async_run_in_db_executor(self.hass, self._query_history_domain, domain)
 
     def _query_history_all(self) -> dict[str, dict]:
         """Query recorder DB for per-entity state history.
@@ -641,7 +666,7 @@ class RecorderAnalyzer:
         self.hass = hass
 
     async def async_analyze(self) -> dict:
-        return await self.hass.async_add_executor_job(self._run_analysis)
+        return await _async_run_in_db_executor(self.hass, self._run_analysis)
 
     def _run_analysis(self) -> dict:
         result = {
@@ -883,7 +908,7 @@ class DashboardAnalyzer:
         self.hass = hass
 
     async def async_analyze(self) -> dict:
-        return await self.hass.async_add_executor_job(self._run_analysis)
+        return await _async_run_in_db_executor(self.hass, self._run_analysis)
 
     # ------------------------------------------------------------------
     # Main runner
@@ -1547,7 +1572,7 @@ class StateStormDetector:
         self.hass = hass
 
     async def async_analyze(self) -> dict:
-        return await self.hass.async_add_executor_job(self._run)
+        return await _async_run_in_db_executor(self.hass, self._run)
 
     def _run(self) -> dict:
         result = {
@@ -1679,6 +1704,8 @@ class AutomationDeadCodeTracer:
         self.hass = hass
 
     async def async_analyze(self) -> dict:
+        # _run only reads .storage/core.automation — filesystem work, not recorder
+        # DB work, so it stays on the general-purpose executor.
         return await self.hass.async_add_executor_job(self._run)
 
     def _run(self) -> dict:
@@ -1887,7 +1914,7 @@ class IntegrationHealthAnalyzer:
         self.hass = hass
 
     async def async_analyze(self) -> dict:
-        return await self.hass.async_add_executor_job(self._run)
+        return await _async_run_in_db_executor(self.hass, self._run)
 
     def _run(self) -> dict:
         result = {
