@@ -5,9 +5,10 @@ Guards the translation dictionary in panel.html against the drift that is easy
 to introduce and hard to notice: a key added to `en` but not to the other 12
 languages, a `{placeholder}` that only some languages carry, an HTML tag dropped
 in translation, a key repeated inside a block (JS silently keeps the last one, so
-a copy-pasted foreign block can override good translations), a backend-emitted
-key that no dictionary defines, or a `t('key')` call site pointing at a key that
-does not exist.
+a copy-pasted foreign block can override good translations), two non-English
+languages sharing most of a key family (one was copy-pasted from the other), a
+backend-emitted key that no dictionary defines, or a `t('key')` call site
+pointing at a key that does not exist.
 
 Dependency-free on purpose: this runs in CI before HACS/hassfest, which have
 their own jobs. Usage:
@@ -324,6 +325,85 @@ def main() -> int:
     for probe in ("dg.startsWith(", "dg.toLowerCase()", "dg.includes("):
         if probe in panel:
             problems.append(f"panel filters translated text with `{probe}` — use _i18nKeyOf() instead")
+
+    # ── cross-language contamination ──────────────────────────────────────────
+    # Comparing a translation against ENGLISH cannot catch a block copied from
+    # another language: the wrong text still differs from English, so key parity
+    # and placeholder checks all pass. What does catch it is byte-identity
+    # between two non-English dictionaries. Upstream shipped eight languages
+    # whose dashLbl* family was another language's text, and nothing noticed.
+    FAMILIES = {
+        "dashLbl*": lambda k: k.startswith("dashLbl"),
+        "reason_*": lambda k: k.startswith("reason_"),
+        "card_*": lambda k: k.startswith("card_"),
+        "storm_*": lambda k: k.startswith("storm_"),
+        "dead_*": lambda k: k.startswith("dead_"),
+        "health_*": lambda k: k.startswith("health_"),
+        "fp_*": lambda k: k.startswith("fp_"),
+        "dash_*": lambda k: k.startswith("dash_") and not k.startswith("dashLbl"),
+    }
+    others = [l for l in sorted(i18n) if l != BASE]
+    for fam, pred in FAMILIES.items():
+        fkeys = [k for k in base_keys if pred(k)]
+        if len(fkeys) < 8:
+            continue
+        threshold = max(5, len(fkeys) * 0.5)
+        for a_i, A in enumerate(others):
+            for B in others[a_i + 1:]:
+                same = [k for k in fkeys
+                        if i18n[A].get(k) is not None and i18n[A].get(k) == i18n[B].get(k)
+                        and i18n[A].get(k) != base.get(k)]
+                if len(same) >= threshold:
+                    problems.append(
+                        f"[{A} / {B}] {len(same)}/{len(fkeys)} {fam} values are byte-identical "
+                        f"— one of these blocks was probably copied from the other language"
+                    )
+
+    # ── vocabulary drift: a key family written in a different language ────────
+    # Byte-identity between two dictionaries only catches a block copied from a
+    # language that is *also* present. Upstream shipped eight languages whose
+    # dashLbl* family was a THIRD language's text (fr held German, nl held
+    # French, pl held Dutch, sv held Polish, hu held Swedish, cs held
+    # Hungarian), so no two of them matched each other and the check above
+    # stayed quiet. The reliable signal is self-consistency: a language's
+    # dashLbl* words should share vocabulary with that same language's other
+    # keys, not with another dictionary's.
+    CLEAN_PREFIXES = ("reason_", "card_", "storm_", "dead_", "health_", "fp_", "dash_")
+    WORD = re.compile(r"[\wÀ-ɏͰ-ϿЀ-ӿ一-鿿]{3,}", re.UNICODE)
+
+    def own_vocab(lang: str) -> set:
+        out = set()
+        for k, v in i18n[lang].items():
+            if k in base_keys and any(k.startswith(p) for p in CLEAN_PREFIXES):
+                out |= {w.lower() for w in WORD.findall(v)}
+        return out
+
+    def probe_tokens(lang: str) -> set:
+        out = set()
+        for k, v in i18n[lang].items():
+            if k.startswith("dashLbl"):
+                out |= {w.lower() for w in WORD.findall(v)}
+        return out
+
+    if all("dashLbl" in i18n[l] for l in i18n):
+        vocabs = {l: own_vocab(l) for l in i18n}
+        for lang in sorted(i18n):
+            toks = probe_tokens(lang)
+            if len(toks) < 8:
+                continue
+            own = len(toks & vocabs[lang])
+            best_other, best_score = None, 0
+            for other in i18n:
+                if other == lang:
+                    continue
+                score = len(toks & vocabs[other])
+                if score > best_score:
+                    best_other, best_score = other, score
+            if best_other and best_score >= 8 and best_score > own * 1.5:
+                problems.append(
+                    f"[{lang}] dashLbl* vocabulary matches {best_other} far better than its own "
+                    f"({best_score} shared words vs {own}) - this family looks like {best_other} text"
+                )
 
     if not args.quiet:
         print(f"languages : {len(i18n)} ({', '.join(sorted(i18n))})")
