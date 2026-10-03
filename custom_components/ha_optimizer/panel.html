@@ -1533,18 +1533,12 @@
 
 <script>
   (function () {
+    // Version only. The diagnostic half runs at the very end of the document:
+    // it measures the live DOM and a function declared in the main script, and
+    // both only exist after that script has run. Measuring earlier reported on
+    // the wrong moment - it called escapeHtml missing on a page that had it.
     var v = new URLSearchParams(location.search).get('v');
     document.getElementById('buildVersion').textContent = v ? 'v' + v : '(unversioned copy)';
-    // What is actually loaded, stated as facts. Several rounds of guessing came
-    // from being unable to see this: the file on disk was correct while the
-    // browser was running an older one, and nothing on screen said so.
-    var tabs = document.querySelectorAll('.tab').length;
-    var esc = (typeof escapeHtml === 'function');
-    var stamp = document.getElementById('buildDiag');
-    if (stamp) {
-      stamp.textContent = '· tabs=' + tabs + ' · esc=' + (esc ? 'ok' : 'MISSING');
-      stamp.style.color = (tabs >= EXPECTED_TABS && esc) ? 'var(--text-muted)' : 'var(--danger)';
-    }
   })();
 </script>
 
@@ -5697,10 +5691,6 @@ function _patchAddonStats(addons) {
 let _sysbarTimer = null;
 const SYSBAR_INTERVAL = 10000; // refresh every 10 s
 
-// How many tabs this build's markup declares. The build strip compares the
-// live DOM against it, so a page running a different file says so itself
-// instead of looking subtly wrong.
-const EXPECTED_TABS = 10;
 
 let _sysbarUnavailableSince = 0;   // 0 = still working
 const SYSBAR_BACKOFF_MS = 60000;   // when unsupported, stop asking so often
@@ -6074,6 +6064,23 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSavedTheme();
   loadSavedLang();
 });
+</script>
+<!-- How many tabs this build's markup declares. The strip above compares the
+     live DOM against it, so a page running a different file says so itself. -->
+<script>const EXPECTED_TAB_COUNT = 10;</script>
+<script>
+/* What this browser actually loaded, as facts. The file on disk was correct
+   while the page was running an older one, and nothing on screen said so.
+   Runs last so that both the tab elements and escapeHtml already exist. */
+(function () {
+  var stamp = document.getElementById('buildDiag');
+  if (!stamp) return;
+  var tabs = document.querySelectorAll('.tab').length;
+  var esc = (typeof escapeHtml === 'function');
+  stamp.textContent = '· tabs=' + tabs + ' · esc=' + (esc ? 'ok' : 'MISSING');
+  stamp.style.color = (tabs === EXPECTED_TAB_COUNT && esc)
+    ? 'var(--text-muted)' : 'var(--danger)';
+})();
 </script>
 <!-- DROPDOWN MENUS — rendered at body level to escape any overflow clipping -->
 <div class="theme-dropdown-menu" id="themeDropdownMenu"></div>
