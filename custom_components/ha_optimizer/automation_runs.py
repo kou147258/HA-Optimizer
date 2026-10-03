@@ -227,28 +227,31 @@ class AutomationRunAnalyzer:
             result["coverage"] = {
                 "traces_available": False,
                 "state": "unavailable",
-                "note": "This Home Assistant version has no trace component, so "
-                        "run outcomes cannot be read at all.",
+                "noteKey": "autoCoverUnavailable",
             }
             return result
+        # No early return here. An absent trace store says the OUTCOMES are
+        # unknown; it says nothing about which automations exist, and returning
+        # an empty list at this point is what made 1.7.20 look exactly like
+        # 1.7.18 - the listing code sat below this branch and was never reached
+        # in the normal case.
         buckets = (self.hass.data or {}).get(data_key) or {}
-        if not buckets:
+        if buckets:
+            result["coverage"] = {
+                "traces_available": True,
+                "state": "ok",
+                "noteKey": "",
+            }
+        else:
             result["coverage"] = {
                 "traces_available": False,
                 "state": "empty",
-                "note": "The trace component is loaded and has recorded no runs. "
-                        "Traces appear once automations have run, and an "
-                        "automation created in YAML needs an id for its traces "
-                        "to be stored at all.",
+                "noteKey": "autoCoverEmpty",
             }
-            return result
-        result["coverage"] = {
-            "traces_available": True,
-            "state": "ok",
-            "note": "",
-        }
 
-        names = self._automation_names()
+        names, enumerate_error = self._automation_names()
+        if enumerate_error:
+            result["coverage"]["enumerate_error"] = enumerate_error
         rows: list[dict[str, Any]] = []
         for automation_id, meta in names.items():
             bucket = buckets.get(automation_id)
@@ -287,7 +290,7 @@ class AutomationRunAnalyzer:
         )
         return result
 
-    def _automation_names(self) -> dict[str, dict[str, Any]]:
+    def _automation_names(self) -> tuple[dict[str, dict[str, Any]], str]:
         """Automation id -> name and disabled state, from the entity registry.
 
         Traces are keyed by the automation's config-entry id, which is not the
@@ -297,8 +300,13 @@ class AutomationRunAnalyzer:
         try:
             ent_reg = er.async_get(self.hass)
         except Exception as exc:  # noqa: BLE001
+            # Reported, not swallowed into an empty page. Returning {} here
+            # renders a tab with nothing on it and no reason, which is how
+            # 1.7.20 came to look exactly like 1.7.18.
             _LOGGER.warning("No entity registry available: %s", exc)
-            return out
+            return out, f"the entity registry is not readable ({exc})"
+        if ent_reg is None:
+            return out, "the entity registry is not loaded"
         for entry in ent_reg.entities.values():
             if entry.domain != "automation":
                 continue
@@ -315,7 +323,7 @@ class AutomationRunAnalyzer:
                 "enabled": (state.state == "on") if state is not None else None,
                 "last_triggered": attrs.get("last_triggered"),
             }
-        return out
+        return out, ""
 
     def _row(self, automation_id: str, meta: dict[str, Any],
              runs: list[dict[str, Any]]) -> dict[str, Any]:
