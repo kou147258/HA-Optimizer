@@ -10,92 +10,35 @@ on:
 
 jobs:
   # ── i18n dictionary consistency ─────────────────────────────────────────────
+  # ── every check, one command ───────────────────────────────────────────────
+  # The output is one line per check in a fixed order, so a red run names the
+  # check id. The report is also written as JSON and uploaded, so two runs can
+  # be diffed instead of read side by side.
   i18n:
-    name: i18n Consistency
+    name: Checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Check translation dictionaries
-        run: python3 tools/check_i18n.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
-      - name: Check version numbers agree
-        run: python3 tools/check_version.py
+      - name: Run every check
+        run: python3 tools/audit.py --json audit-report.json
 
-      - name: Purge safety regression tests
-        run: python3 tools/test_purge_safety.py
-
-      - name: Panel sync and service registration regression tests
-        run: python3 tools/test_panel_sync.py
-
-      - name: Build stamp and cache-busting checks
-        run: python3 tools/test_build_stamp.py
-
-      - name: Filter behaviour tests
-        run: node tools/test_filters.js
-
-      - name: Trash bulk-operation regression tests
-        run: python3 tools/test_trash_bulk.py
-
-      - name: UI label and control-naming checks
-        run: python3 tools/test_ui_labels.py
-
-      # Proves the suite above can still fail: each defect the 1.7.2 UI audit
-      # found is injected into a copy of the panel and must be caught.
-      - name: UI label checks can still fail
-        run: node tools/counterproof_ui_labels.js
-
-      - name: Restore-truth regression tests
-        run: python3 tools/test_restore_truth.py
-
-      - name: Restore-truth checks can still fail
-        run: python3 tools/counterproof_restore.py
-
-      # The live-instance defect: a restore that only edits the registry row
-      # never re-instantiates the entity.
-      - name: Restore engine behaviour tests
-        run: python3 tools/test_restore_engine.py
-
-      # The gate on the only irreversible job, and its counter-proofs.
-      - name: Safety gate checks
-        run: python3 tools/test_safety_gate.py
-
-      - name: Safety gate checks can still fail
-        run: python3 tools/counterproof_safety_gate.py
-
-      - name: Store concurrency and merge checks
-        run: python3 tools/test_store_concurrency.py
-
-      - name: Fail-loud checks and whole-file mechanical sweep
-        run: python3 tools/test_fail_loud.py
-
-      - name: Compatibility claim checks
-        run: python3 tools/test_compat_claims.py
-
-      - name: Live-log regression checks
-        run: python3 tools/test_live_log_findings.py
-
-      # v1.7.9 shipped an if/elif block flattened onto one 900-char line: it
-      # compiled, every gate passed, and the guard it contained never ran.
-      # These check branch structure and line shape, not just key presence.
-      - name: Dead-guard and flattened-line checks
-        run: python3 tools/test_dead_guard.py
-
-      - name: Dead-guard checks can still fail
-        run: python3 tools/counterproof_dead_guard.py
-
-      # HA 2026.8 lets the user rename an entity_id, and the trash is keyed by
-      # entity_id. These run the real store against a fake registry so the
-      # rename is exercised, not string-matched.
-      - name: Registry-identity behaviour tests
-        run: python3 tools/test_rename_identity.py
-
-      - name: Registry-identity checks can still fail
-        run: python3 tools/counterproof_rename_identity.py
+      - name: Publish the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-report
+          path: audit-report.json
 
   # ── HACS Validation ──────────────────────────────────────────────────────────
   hacs-validate:
