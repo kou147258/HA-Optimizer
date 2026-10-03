@@ -171,6 +171,12 @@ class DailyProfiler:
 
                 # 4. Integration restarts: count states flipping to unavailable/unknown
                 #    per platform — the best proxy that needs no log file access
+                # The LIMIT applies to the LIST, never to the total. It used to
+                # apply to both, because the sum was taken over the rows the
+                # query returned: twenty-five entities each writing four
+                # unavailable states made the day's total 100 and the metric
+                # 80, silently, and the same number feeds the sigma z-score,
+                # so a busy day was understated exactly when it mattered most.
                 rows_restart = session.execute(text(f"""
                     SELECT entity_id, COUNT(*) as cnt
                     FROM states
@@ -179,9 +185,9 @@ class DailyProfiler:
                     GROUP BY entity_id
                     HAVING COUNT(*) >= 3
                     ORDER BY cnt DESC
-                    LIMIT 20
                 """)).fetchall()
                 metrics["unavail_events"] = int(sum(r[1] for r in rows_restart))
+                metrics["unavail_entities"] = len(rows_restart)
                 metrics["unstable_entities"] = [
                     {"entity_id": r[0], "count": int(r[1])} for r in rows_restart[:5]
                 ]
@@ -413,7 +419,16 @@ class CorrelationLinker:
                 top = today_metrics.get("top_writers", [])
                 if top:
                     top1 = top[0]
-                    total = today_metrics.get("total_writes", 1)
+                    # The RAW total, because it and the numerator have to come
+                    # from the same window. `total_writes` is extrapolated to
+                    # 24h so that a partial today compares fairly with a full
+                    # baseline day; `top1["writes"]` is not. Dividing one by the
+                    # other understated the share by exactly that factor: at
+                    # 06:00 an entity with 400 of 600 writes - genuinely 67% -
+                    # was computed as 17%, fell under the 20% gate below, and
+                    # the correlation silently disappeared until the evening.
+                    total = today_metrics.get("total_writes_raw") \
+                        or today_metrics.get("total_writes", 1)
                     share = round(top1["writes"] / max(total, 1) * 100)
                     if share >= 20:
                         correlations.append({
@@ -589,6 +604,8 @@ class FingerprintAnalyzer:
                     metrics["automation_triggers"] = 0
                     metrics["automation_triggers_raw"] = 0
 
+                # No LIMIT: the sum below is the day's total, and a limited row
+                # set understates it — then extrapolates what it undercounted.
                 rows_restart = session.execute(text(f"""
                     SELECT entity_id, COUNT(*) as cnt
                     FROM states
@@ -597,11 +614,11 @@ class FingerprintAnalyzer:
                     GROUP BY entity_id
                     HAVING COUNT(*) >= 2
                     ORDER BY cnt DESC
-                    LIMIT 20
                 """)).fetchall()
                 raw_unavail = int(sum(r[1] for r in rows_restart))
                 metrics["unavail_events"] = round(raw_unavail * 24 / max(hours_elapsed, 1))
                 metrics["unavail_events_raw"] = raw_unavail
+                metrics["unavail_entities"] = len(rows_restart)
                 metrics["unstable_entities"] = [
                     {"entity_id": r[0], "count": int(r[1])} for r in rows_restart[:5]
                 ]

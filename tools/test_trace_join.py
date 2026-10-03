@@ -207,10 +207,16 @@ RETURNED = [stored("11111"), stored("8f2c1d")]
 
 class _Storage:
     def __init__(self, hass, version, key):
+        self.version = version
         self.key = key
 
     async def async_load(self):
-        assert self.key == "trace.saved_traces", self.key
+        # The key and version come from the trace component rather than from a
+        # literal in the component under test, so the stub has to supply them.
+        # It did not, at first: the test went red with 0 keys and no clue, which
+        # is exactly what a hardcoded key would have produced silently.
+        assert self.key == STORAGE_KEY, (self.key, STORAGE_KEY)
+        assert self.version == STORAGE_VERSION, (self.version, STORAGE_VERSION)
         return STORED_TRACES
 
 
@@ -220,6 +226,10 @@ async def _done(hass):
 
 util = types.ModuleType("homeassistant.components.trace.util")
 util.async_restore_traces = _done
+# trace/__init__.py in HA 2026.8.3. The component under test imports these
+# rather than hardcoding them, so the stub has to carry them.
+STORAGE_KEY = "trace.saved_traces"
+STORAGE_VERSION = 1
 
 
 async def _list(hass, domain, key):
@@ -231,6 +241,8 @@ util.async_list_traces = _list
 storage_mod = types.ModuleType("homeassistant.helpers.storage")
 storage_mod.Store = _Storage
 trace_pkg = types.ModuleType("homeassistant.components.trace")
+trace_pkg.STORAGE_KEY = STORAGE_KEY
+trace_pkg.STORAGE_VERSION = STORAGE_VERSION
 components = types.ModuleType("homeassistant.components")
 components.trace = trace_pkg
 trace_pkg.util = util

@@ -478,7 +478,12 @@ class DataScanner:
         results = []
         try:
             automations = self.hass.states.async_all("automation")
-            history_map = await self._get_history_map_for_domain("automation")
+            # No history map here. There was one - a recorder round trip
+            # over every automation's state rows - and nothing in this
+            # function ever read it: the run fact it needs is
+            # `last_triggered` on the state object, which is already in
+            # memory. Same shape as the dead `rows_total` query: paid for
+            # on every scan, used never.
             ent_reg = er.async_get(self.hass)
 
             for state in automations:
@@ -2118,11 +2123,12 @@ class IntegrationHealthAnalyzer:
             if is_mysql:
                 ts_7d  = "UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL 7 DAY))"
                 ts_24h = "UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL 24 HOUR))"
-                ts_1h  = "UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL 1 HOUR))"
             else:
                 ts_7d  = "strftime('%s', 'now', '-7 days')"
                 ts_24h = "strftime('%s', 'now', '-24 hours')"
-                ts_1h  = "strftime('%s', 'now', '-1 hour')"
+                # No ts_1h: it existed only for the "current snapshot"
+                # query, which asked whether an unavailable row had appeared
+                # in the last hour rather than what the state is now.
 
             with instance.get_session() as session:
                 # A) Connectivity: total unavailable/unknown events per entity, last 7d
@@ -2137,15 +2143,16 @@ class IntegrationHealthAnalyzer:
                 """)).fetchall()
                 unavail_7d = {r[0]: int(r[1]) for r in rows_7d if r[0]}
 
-                # B) Current state snapshot — entities right now unavailable/unknown
-                rows_cur = session.execute(text(f"""
-                    SELECT entity_id, state
-                    FROM states
-                    WHERE last_updated_ts > {ts_1h}
-                      AND state IN ('unavailable', 'unknown')
-                    GROUP BY entity_id
-                """)).fetchall()
-                currently_unavail = {r[0]: r[1] for r in rows_cur if r[0]}
+                # B) There is deliberately no "current snapshot" query here.
+                # One existed and it answered a different question than the one
+                # it was labelled with: it asked which entities had ANY
+                # unavailable row in the last hour, so an entity that went down
+                # and recovered inside that window still counted as down - in
+                # the health score, the diagnosis, the problem-device list and
+                # the currently_down total. It also selected a bare `state`
+                # column under GROUP BY, which MySQL rejects outright under its
+                # default ONLY_FULL_GROUP_BY. The state machine answers the
+                # present directly and is already in memory.
 
                 # E) Spike detection: events in last 24h
                 rows_24h = session.execute(text(f"""
@@ -2212,8 +2219,9 @@ class IntegrationHealthAnalyzer:
                     reconnects_7d = unavail_7d.get(eid, 0)
                     today_cnt     = unavail_24h.get(eid, 0)
                     avg_per_day   = baseline_map.get(eid, 0)
-                    cur_state     = currently_unavail.get(eid)
-                    is_down_now   = cur_state is not None
+                    state_live    = self.hass.states.get(eid)
+                    is_down_now   = bool(
+                        state_live and state_live.state in ("unavailable", "unknown"))
 
                     if reconnects_7d > 0:
                         conn_issues += 1
@@ -2235,8 +2243,7 @@ class IntegrationHealthAnalyzer:
                             if dev:
                                 dev_name = dev.name_by_user or dev.name or eid
 
-                        state_now = self.hass.states.get(eid)
-                        current_val = state_now.state if state_now else "?"
+                        current_val = state_live.state if state_live else "?"
 
                         problem = {
                             "entity_id": eid,

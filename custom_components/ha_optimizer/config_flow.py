@@ -26,8 +26,13 @@ STEP_SCHEMA = vol.Schema({
         vol.All(int, vol.Range(min=1, max=365)),
     vol.Optional(CONF_ENABLE_SOFT_DELETE, default=DEFAULT_ENABLE_SOFT_DELETE):
         bool,
+    # 0 is allowed and means "never expire". The README documents it as
+    # the way to keep the trash indefinitely, and the store now honours it;
+    # the floor of 1 made the documented switch unreachable, and the only
+    # way to reach 0 was to set it by hand - where it used to mean the
+    # opposite, expiring everything at once.
     vol.Optional(CONF_SOFT_DELETE_DAYS, default=DEFAULT_SOFT_DELETE_DAYS):
-        vol.All(int, vol.Range(min=1, max=90)),
+        vol.All(int, vol.Range(min=0, max=90)),
     vol.Optional(CONF_EXCLUDE_DEVICE_CLASSES, default=DEFAULT_EXCLUDE_DEVICE_CLASSES):
         str,
 })
@@ -110,7 +115,7 @@ class PurgeEngineOptionsFlow(config_entries.OptionsFlow):
             vol.Optional(
                 CONF_SOFT_DELETE_DAYS,
                 default=current.get(CONF_SOFT_DELETE_DAYS, DEFAULT_SOFT_DELETE_DAYS),
-            ): vol.All(int, vol.Range(min=1, max=90)),
+            ): vol.All(int, vol.Range(min=0, max=90)),
             vol.Optional(
                 CONF_EXCLUDE_DEVICE_CLASSES,
                 default=current.get(CONF_EXCLUDE_DEVICE_CLASSES, DEFAULT_EXCLUDE_DEVICE_CLASSES),

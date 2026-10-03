@@ -47,12 +47,27 @@ class PurgeEngine:
                 domain = entity_id.split(".")[0]
 
                 if not entry:
-                    # Not in registry — try domain-specific removal
-                    ok = await self._remove_by_domain(entity_id)
-                    if ok:
+                    # Not in registry — try domain-specific removal.
+                    # Compared against the outcome, not merely tested for
+                    # truthiness: `_remove_by_domain` returns "not_found" and
+                    # "disabled" as readily as "removed", and every one of
+                    # those strings is truthy, so `if ok:` was always true.
+                    # The result was that an entity nothing had removed was
+                    # reported as deleted, the caller then dropped the only
+                    # record it had of it, and the notification said it was
+                    # permanently gone. The automation branch below has
+                    # compared the same return value correctly all along; this
+                    # branch was the one left behind.
+                    outcome = await self._remove_by_domain(entity_id)
+                    if outcome == "removed":
                         results["success"].append(entity_id)
+                    elif outcome == "disabled":
+                        results["disabled_only"].append(entity_id)
                     else:
-                        results["failed"].append({"entity_id": entity_id, "error": "Not found in registry"})
+                        results["failed"].append({
+                            "entity_id": entity_id,
+                            "error": "Not found in registry and not removable",
+                        })
                     continue
 
                 # For automations and scripts, always use domain-specific deletion

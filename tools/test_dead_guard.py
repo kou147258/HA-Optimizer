@@ -300,6 +300,9 @@ JS_BUILTIN = {
     "class", "extends", "do", "else", "try", "throw", "case", "default", "var",
     "let", "const", "null", "true", "false", "undefined", "NaN", "Infinity",
     "callService", "extractData", "haShowMoreInfo",  # panel-local, defined there
+    # Browser globals the panel calls. `confirm` guards the two irreversible
+    # buttons, so it is the one that must not read as undefined.
+    "confirm", "alert", "prompt", "open", "close", "focus", "blur", "scrollTo",
     # CSS functions that survive the style-attribute strip because the panel
     # also embeds CSS in template strings.
     "rgba", "linear-gradient", "radial-gradient", "translateX", "translateY",
@@ -310,6 +313,107 @@ JS_BUILTIN = {
 }
 
 
+def _skip_template(js: str, i: int) -> int:
+    """Index just past the template literal whose opening backtick is at i."""
+    n = len(js)
+    i += 1
+    while i < n:
+        c = js[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "`":
+            return i + 1
+        if c == "$" and i + 1 < n and js[i + 1] == "{":
+            i = _skip_expr(js, i + 2)
+            continue
+        i += 1
+    return n
+
+
+def _skip_expr(js: str, i: int) -> int:
+    """Index of the '}' closing a `${` whose body starts at i."""
+    n = len(js)
+    depth = 1
+    while i < n:
+        c = js[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c in "'\"":
+            q = c
+            i += 1
+            while i < n and js[i] != q:
+                i += 2 if js[i] == "\\" else 1
+            i += 1
+            continue
+        if c == "`":
+            i = _skip_template(js, i)
+            continue
+        if c == "/" and i + 1 < n and js[i + 1] == "/":
+            j = js.find("\n", i)
+            i = n if j == -1 else j
+            continue
+        if c == "/" and i + 1 < n and js[i + 1] == "*":
+            j = js.find("*/", i + 2)
+            i = n if j == -1 else j + 2
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return n
+
+
+def _strip_literals(js: str) -> str:
+    """Blank out comments and every kind of literal, honouring nesting.
+
+    This replaces a set of regexes that stripped template literals as
+    `` `...` ``. That cannot work here: a template literal may hold `${ ... }`
+    containing another template literal, and this file does that everywhere, so
+    pairing backticks sequentially mislabels every literal after the first
+    nest. The mislabel boundary happened to sit somewhere harmless, so the
+    check was green - and an unrelated edit elsewhere in the file moved it, and
+    the check then reported three names that are defined in the file and one
+    that is a browser builtin. A check whose verdict depends on where an
+    unrelated edit landed is not a check.
+    """
+    out = []
+    i, n = 0, len(js)
+    while i < n:
+        c = js[i]
+        if c == "/" and i + 1 < n and js[i + 1] == "/":
+            j = js.find("\n", i)
+            i = n if j == -1 else j
+            continue
+        if c == "/" and i + 1 < n and js[i + 1] == "*":
+            j = js.find("*/", i + 2)
+            i = n if j == -1 else j + 2
+            continue
+        if c in "'\"":
+            q = c
+            i += 1
+            while i < n and js[i] != q:
+                if js[i] == "\\":
+                    i += 1
+                if i < n and js[i] == "\n":
+                    break        # unterminated: do not swallow the rest of the file
+                i += 1
+            i += 1
+            out.append(" ")
+            continue
+        if c == "`":
+            i = _skip_template(js, i)
+            out.append(" ")
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def check_undefined_js_names(root: Path) -> list[str]:
     import re as _re
 
@@ -317,6 +421,37 @@ def check_undefined_js_names(root: Path) -> list[str]:
     declared = set(_re.findall(r"(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(", panel))
     declared |= set(_re.findall(r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\s*)?\(", panel))
     declared |= set(_re.findall(r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*\[[^\]]*\]\.map", panel))
+    # `const NAME = IDENT => ...` declares exactly what `= (...) =>` declares,
+    # and the panel uses both forms. Only the parenthesised one was collected,
+    # so a one-parameter arrow helper read as an undefined call.
+    declared |= set(_re.findall(
+        r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?[A-Za-z_$][\w$]*\s*=>",
+        panel))
+    # ANY `const`/`let`/`var` binding counts, whatever it is initialised to. A
+    # name bound to a non-function and then called is a real defect, but a name
+    # bound to a function and shadowed by a later `let val = dict[key]` in
+    # another scope is not - and the narrower pattern reported the latter.
+    declared |= set(_re.findall(r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=", panel))
+    # Formal parameters bind too: `restorers.forEach(fn => fn())` is not a call
+    # to an undefined `fn`.
+    declared |= set(_re.findall(r"function[^(]*\(([^)]*)\)", panel))
+    for params in _re.findall(r"function[^(]*\(([^)]*)\)", panel):
+        for part in params.split(","):
+            token = part.strip().split("=")[0].strip().lstrip(".")
+            if _re.fullmatch(r"[A-Za-z_$][\w$]*", token or ""):
+                declared.add(token)
+    for params in _re.findall(r"\(([^()]*)\)\s*=>", panel):
+        for part in params.split(","):
+            token = part.strip().split("=")[0].strip().lstrip(".")
+            if _re.fullmatch(r"[A-Za-z_$][\w$]*", token or ""):
+                declared.add(token)
+    # A single parameter needs no parentheses: `forEach(fn => fn())` binds `fn`
+    # just as firmly as `(fn) =>` does.
+    declared |= set(_re.findall(r"(?<![\w$.])([A-Za-z_$][\w$]*)\s*=>", panel))
+    # A name reached only through `typeof X === 'function'` is a deliberate
+    # optional hook: `typeof` on an undeclared identifier is safe, and the
+    # branch simply does not run when nothing implements it.
+    declared |= set(_re.findall(r"typeof\s+([A-Za-z_$][\w$]*)\s*===?\s*['\"]function['\"]", panel))
     # Object-literal members that hold functions, e.g. I18N entries.
     declared |= set(_re.findall(r"^\s*([A-Za-z_$][\w$]*)\s*:\s*(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>", panel, _re.M))
     declared |= set(_re.findall(r"^\s*([A-Za-z_$][\w$]*)\s*:\s*function", panel, _re.M))
@@ -334,13 +469,9 @@ def check_undefined_js_names(root: Path) -> list[str]:
     js = _re.sub(r'style\s*=\s*"[^"]*"', " ", js)
     js = _re.sub(r"style\s*=\s*'[^']*'", " ", js)
     # Drop comments, then string and template literals: a word that only appears
-    # inside a sentence or a stylesheet is not a call.
-    js = _re.sub(r"/\*[\s\S]*?\*/", " ", js)
-    js = _re.sub(r"(?m)^\s*//.*$", " ", js)
-    js = _re.sub(r"(?m)(?<![:\\])//[^\n\"']*$", " ", js)
-    js = _re.sub(r"`(?:\\.|[^`\\])*`", " ", js)
-    js = _re.sub(r"'(?:\\.|[^'\\])*'", " ", js)
-    js = _re.sub(r'"(?:\\.|[^"\\])*"', " ", js)
+    # inside a sentence or a stylesheet is not a call. Nesting-aware, because a
+    # regex cannot pair backticks across a ${ } that holds another literal.
+    js = _strip_literals(js)
     # Object method shorthand / class members are not free calls.
     js = _re.sub(r"(?<![\w$])([A-Za-z_$][\w$]*)\s*:\s*function", " obj:", js)
     js = _re.sub(r"(?<![\w$])([A-Za-z_$][\w$]*)\s*\(", r"\1(", js)

@@ -1426,7 +1426,7 @@
   <!-- STATE STORM TAB -->
   <div id="tabStorms" style="display:none">
     <div class="toolbar" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px">
-      <button class="btn btn-primary" onclick="triggerStormAnalysis()" id="btnStorms"><span data-i18n="btnStorms">⚡ Detect State Storms</span><orm</button>
+      <button class="btn btn-primary" onclick="triggerStormAnalysis()" id="btnStorms"><span data-i18n="btnStorms">⚡ Detect State Storms</span></button>
       <span style="color:var(--text-muted); font-size:0.85rem" id="stormsDescSpan" data-i18n="stormsDesc">Find abnormally frequent state updates → root cause of DB bloat & browser lag</span>
     </div>
     <div id="stormsContent"><div class="empty-state"><div class="icon">⚡</div><h3 data-i18n="noData">No data yet</h3><p data-i18n="clickToStart2">Click the button to start analysis.</p></div></div>
@@ -1435,7 +1435,7 @@
   <!-- DEAD CODE TAB -->
   <div id="tabDeadcode" style="display:none">
     <div class="toolbar" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px">
-      <button class="btn btn-primary" onclick="triggerDeadCodeAnalysis()" id="btnDeadcode"><span data-i18n="btnDeadcode">🔍 Analyze Dead Code</span><d Code</button>
+      <button class="btn btn-primary" onclick="triggerDeadCodeAnalysis()" id="btnDeadcode"><span data-i18n="btnDeadcode">🔍 Analyze Dead Code</span></button>
       <span style="color:var(--text-muted); font-size:0.85rem" id="deadcodeDescSpan" data-i18n="deadcodeDesc">Find automations with broken triggers, actions or conditions</span>
     </div>
     <div id="deadcodeContent"><div class="empty-state"><div class="icon">🔍</div><h3 data-i18n="noData">No data yet</h3><p data-i18n="clickToStart2">Click the button to start analysis.</p></div></div>
@@ -1444,7 +1444,7 @@
   <!-- INTEGRATION HEALTH TAB -->
   <div id="tabHealth" style="display:none">
     <div class="toolbar" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px">
-      <button class="btn btn-primary" onclick="triggerHealthAnalysis()" id="btnHealth"><span data-i18n="btnHealth">💚 Check Integration Health</span><ion Health</button>
+      <button class="btn btn-primary" onclick="triggerHealthAnalysis()" id="btnHealth"><span data-i18n="btnHealth">💚 Check Integration Health</span></button>
       <span style="color:var(--text-muted); font-size:0.85rem" id="healthDescSpan" data-i18n="healthDesc">Analyze reconnects, weak battery, signal issues per integration</span>
     </div>
     <div id="healthContent"><div class="empty-state"><div class="icon">💚</div><h3 data-i18n="noData">No data yet</h3><p data-i18n="clickToStart2">Click the button to start analysis.</p></div></div>
@@ -1454,7 +1454,7 @@
   <div id="tabFingerprint" style="display:none">
     <div class="toolbar" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px">
       <div style="display:flex; gap:10px; flex-wrap:wrap">
-        <button class="btn btn-primary" onclick="triggerFingerprintAnalysis()" id="btnFingerprint"><span data-i18n="btnFingerprint">🫆 Analyze Fingerprint</span><ch Fingerprint</button>
+        <button class="btn btn-primary" onclick="triggerFingerprintAnalysis()" id="btnFingerprint"><span data-i18n="btnFingerprint">🫆 Analyze Fingerprint</span></button>
         <button class="btn btn-ghost" onclick="triggerCollectBaseline()" id="btnCollectBaseline" data-i18n-title="btnCollectBaselineTitle" title="Collect baseline — saves yesterday's data"><span data-i18n="btnCollectBaseline">📥 Collect Baseline</span></button>
       </div>
       <div style="font-size:0.82rem; color:var(--text-muted); max-width:400px; line-height:1.5" id="fingerprintDescDiv">
@@ -1997,7 +1997,7 @@ function selectGroup(areaId) {
   const ids = allResults.filter(r => String(r.area_id === null ? '' : r.area_id) === String(areaId))
                         .map(r => r.entity_id);
   ids.forEach(id => selectedIds.add(id));
-  updateSelectionUI();
+  updateSelectedBar();
   toast(t('groupSelected', { n: ids.length }), 'info');
 }
 
@@ -2402,7 +2402,7 @@ function renderTable() {
       <td>
         <div style="display:flex; align-items:center; gap:6px">
           <div>
-            <div class="entity-name">${r.name}</div>
+            <div class="entity-name">${escapeHtml(r.name)}</div>
             <div class="entity-id">${r.entity_id}</div>
           </div>
           ${entityLink}
@@ -2430,6 +2430,7 @@ function renderTable() {
   }
 
   updateSelectedBar();
+  updateMasterCheck();
 }
 
 function goPage(p) {
@@ -2678,10 +2679,23 @@ function renderAutomationRuns(host, d) {
   const cov = d.coverage || {};
   let html = '';
   const rows_placeholder = (d.automations || []).length > 0;
+  // Why the automations could not be listed, shown in both branches below. It
+  // used to be computed by the backend, put on the wire, and never rendered -
+  // so an instance where the entity registry was unreadable showed an empty
+  // page with no reason on it, which is the same page as "there are no
+  // automations".
+  const listProblem = cov.enumerate_error
+    ? `<div style="display:flex; gap:10px; align-items:flex-start; padding:12px 14px;
+         margin-bottom:16px; border-radius:8px; background:rgba(244,67,54,0.1);
+         border:1px solid rgba(244,67,54,0.35)">
+       <span>⚠️</span><div style="flex:1; font-size:0.85rem">${
+         escapeHtml(t('autoEnumerateFailed', { why: cov.enumerate_error }))}</div>
+     </div>`
+    : '';
   if (!cov.traces_available && !rows_placeholder) {
     // One banner, carrying the reason. It used to be printed twice - once here
     // and again as the empty state below - on a screen with nothing else on it.
-    html += `<div style="display:flex; gap:10px; align-items:flex-start; padding:12px 14px;
+    html += listProblem + `<div style="display:flex; gap:10px; align-items:flex-start; padding:12px 14px;
         margin-bottom:20px; border-radius:8px; background:rgba(255,152,0,0.1);
         border:1px solid rgba(255,152,0,0.35)">
       <span>⚠️</span>
@@ -2696,6 +2710,7 @@ function renderAutomationRuns(host, d) {
   } else {
     const s = d.summary || {};
     const rate = s.success_rate === null || s.success_rate === undefined ? '—' : s.success_rate + '%';
+    html += listProblem;
     // What the read actually saw, in numbers. Four releases of this page
     // reported a confident verdict from data it had failed to attach to
     // anything, and every one of those layers said so in prose nobody could
@@ -2708,9 +2723,18 @@ function renderAutomationRuns(host, d) {
            ${escapeHtml(t('autoObserved', {
              buckets: obs.buckets ?? '—', runs: obs.runs ?? '—',
              unmatched: cov.unmatched_runs ?? 0 }))}
+           ${(cov.unmatched_runs)
+             ? `<div style="margin-top:3px">${escapeHtml(t('autoUnmatchedIds', {
+                 ids: (cov.unmatched_ids || []).join(', ') || '—' }))}</div>` : ''}
            ${(obs.storage_runs !== undefined)
              ? `<div style="margin-top:3px">${escapeHtml(t('autoObservedStored', {
                  keys: obs.storage_keys ?? 0, runs: obs.storage_runs }))}</div>` : ''}
+           ${(obs.bucket_key_missing || obs.buckets_unavailable || obs.storage_error)
+             ? `<div style="margin-top:3px; color:var(--warning, #ff9800)">${
+                 escapeHtml(t('autoObservedIncomplete', {
+                   why: obs.bucket_key_missing ? t('autoNoBucketKey')
+                     : (obs.buckets_unavailable ? t('autoNoBucketStore')
+                        : t('autoNoStorageRead')) }))}</div>` : ''}
          </div>` : '';
     html += `<div class="stat-card" style="text-align:left; padding:16px; margin-bottom:20px">
       <h3 style="margin-bottom:12px; font-size:1rem">${escapeHtml(t('autoSummaryTitle'))}</h3>
@@ -3152,7 +3176,7 @@ async function triggerRecorderAnalysis() {
     renderRecorderResults(data, Date.now());
     toast('success', `✅ ${t('recorderDone')}`);
   } catch(e) {
-    container.innerHTML = `<div class="empty-state"><div class="icon">❌</div><h3>${t('errAnalysis')}</h3><p>${e.message}</p></div>`;
+    container.innerHTML = `<div class="empty-state"><div class="icon">❌</div><h3>${t('errAnalysis')}</h3><p>${escapeHtml(e.message)}</p></div>`;
     toast('error', `❌ ${e.message}`);
   } finally {
     btn.disabled = false;
@@ -3285,7 +3309,7 @@ async function triggerDashboardAnalysis() {
       : `✅ ${t('dashboardDone')}`;
     toast(sum.total_critical > 0 ? 'warn' : 'success', msg);
   } catch(e) {
-    container.innerHTML = `<div class="empty-state"><div class="icon">❌</div><h3>${t('errTitle')}</h3><p>${e.message}</p></div>`;
+    container.innerHTML = `<div class="empty-state"><div class="icon">❌</div><h3>${t('errTitle')}</h3><p>${escapeHtml(e.message)}</p></div>`;
     toast('error', `❌ ${e.message}`);
   } finally {
     btn.disabled = false;
@@ -3378,7 +3402,7 @@ function renderDashboardResults(d, ts) {
       <tbody>
         ${d.dashboards.map(dash => `
           <tr style="border-top:1px solid var(--border)">
-            <td style="padding:7px 10px; font-weight:600">${dash.name}</td>
+            <td style="padding:7px 10px; font-weight:600">${escapeHtml(dash.name)}</td>
             <td style="padding:7px 10px; text-align:center">${dash.views}</td>
             <td style="padding:7px 10px; text-align:center">${dash.cards}</td>
             <td style="padding:7px 10px; text-align:center; color:${dash.heavy_cards>0?'var(--warning)':'var(--success)'}">${dash.heavy_cards}</td>
@@ -3553,7 +3577,7 @@ function renderDashboardResults(d, ts) {
             <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:6px">
               <div style="flex:1; min-width:0">
                 <div style="font-family:monospace; font-size:0.82rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${w.entity_id}</div>
-                ${w.name && w.name !== w.entity_id ? `<div style="font-size:0.78rem; color:var(--text-muted)">${w.name}</div>` : ''}
+                ${w.name && w.name !== w.entity_id ? `<div style="font-size:0.78rem; color:var(--text-muted)">${escapeHtml(w.name)}</div>` : ''}
               </div>
               <div style="text-align:right; flex-shrink:0">
                 <div style="font-weight:800; font-size:1.1rem; color:${wColor}; line-height:1">${w.writes_per_day.toFixed(0)}</div>
@@ -3588,7 +3612,7 @@ function renderDashboardResults(d, ts) {
                 <div style="font-family:monospace; font-size:0.82rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"
                      onclick="haNavigate('/config/entities?search=${encodeURIComponent(r.entity_id)}')"
                      style="cursor:pointer">${r.entity_id}</div>
-                ${r.name && r.name !== r.entity_id ? `<div style="font-size:0.78rem; color:var(--text-muted)">${r.name}</div>` : ''}
+                ${r.name && r.name !== r.entity_id ? `<div style="font-size:0.78rem; color:var(--text-muted)">${escapeHtml(r.name)}</div>` : ''}
               </div>
               <div style="text-align:right; flex-shrink:0; line-height:1.3">
                 <div style="font-weight:800; color:${rColor}">${r.waste_ratio}x</div>
@@ -3653,7 +3677,7 @@ async function triggerStormAnalysis() {
     renderStormResults(data, Date.now());
     toast('success', `✅ ${t('stormsFound', data.summary?.total_storms || 0)}`);
   } catch(e) {
-    c.innerHTML = `<div class="empty-state"><div class="icon">❌</div><h3>${t('errTitle')}</h3><p>${e.message}</p></div>`;
+    c.innerHTML = `<div class="empty-state"><div class="icon">❌</div><h3>${t('errTitle')}</h3><p>${escapeHtml(e.message)}</p></div>`;
     toast('error', `❌ ${e.message}`);
   } finally { btn.disabled = false; btn.innerHTML = t('btnStorms'); }
 }
@@ -3681,7 +3705,7 @@ function renderStormResults(d, ts) {
     return `<div class="stat-card" style="text-align:left; padding:16px; border-left:4px solid ${sevColor}">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px; margin-bottom:10px">
         <div>
-          <div style="font-weight:700; font-size:0.95rem">${sevIcon} ${s.name}</div>
+          <div style="font-weight:700; font-size:0.95rem">${sevIcon} ${escapeHtml(s.name)}</div>
           <div style="font-family:monospace; font-size:0.78rem; color:var(--text-muted)">${s.entity_id}</div>
         </div>
         <div style="text-align:right">
@@ -3724,7 +3748,7 @@ async function triggerDeadCodeAnalysis() {
     renderDeadCodeResults(data, Date.now());
     toast('success', `✅ ${t('deadcodeDone', data.total_analyzed)}`);
   } catch(e) {
-    c.innerHTML = `<div class="empty-state"><div class="icon">❌</div><h3>${t('errTitle')}</h3><p>${e.message}</p></div>`;
+    c.innerHTML = `<div class="empty-state"><div class="icon">❌</div><h3>${t('errTitle')}</h3><p>${escapeHtml(e.message)}</p></div>`;
     toast('error', `❌ ${e.message}`);
   } finally { btn.disabled = false; btn.innerHTML = t('btnDeadcode'); }
 }
@@ -3796,7 +3820,7 @@ async function triggerHealthAnalysis() {
     renderHealthResults(data, Date.now());
     toast('success', `✅ ${t('healthDone')}`);
   } catch(e) {
-    c.innerHTML = `<div class="empty-state"><div class="icon">❌</div><h3>${t('errTitle')}</h3><p>${e.message}</p></div>`;
+    c.innerHTML = `<div class="empty-state"><div class="icon">❌</div><h3>${t('errTitle')}</h3><p>${escapeHtml(e.message)}</p></div>`;
     toast('error', `❌ ${e.message}`);
   } finally { btn.disabled = false; btn.innerHTML = t('btnHealth'); }
 }
@@ -3913,7 +3937,7 @@ function renderHealthResults(d, ts) {
       <div class="stat-card" style="text-align:left; padding:16px; border-left:4px solid ${scoreColor(ig.health_score)}">
         <!-- Header -->
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px">
-          <div style="font-weight:700; font-size:0.95rem">${scoreIcon(ig.health_score)} ${ig.name}</div>
+          <div style="font-weight:700; font-size:0.95rem">${scoreIcon(ig.health_score)} ${escapeHtml(ig.name)}</div>
           <div style="text-align:right">
             <div style="font-size:1.5rem; font-weight:800; color:${scoreColor(ig.health_score)}; line-height:1">${ig.health_score}</div>
             <div style="font-size:0.68rem; color:${scoreColor(ig.health_score)}; text-transform:uppercase; font-weight:600">${statusLabel(ig.health_score)}</div>
@@ -4050,7 +4074,7 @@ async function triggerFingerprintAnalysis() {
     const n = data.anomalies?.length || 0;
     toast(n > 0 ? 'warn' : 'success', n > 0 ? `⚠️ ${t('fingerprintFoundAnomalies', n)}` : `✅ ${t('fingerprintNormal')}`);
   } catch(e) {
-    c.innerHTML = `<div class="empty-state"><div class="icon">❌</div><h3>${t('errTitle')}</h3><p>${e.message}</p></div>`;
+    c.innerHTML = `<div class="empty-state"><div class="icon">❌</div><h3>${t('errTitle')}</h3><p>${escapeHtml(e.message)}</p></div>`;
     toast('error', `❌ ${e.message}`);
   } finally {
     btn.disabled = false;
@@ -4507,6 +4531,12 @@ const I18N = {
     autoStatNotTriggered: (p) => `${p.n} trigger checks declined`,
     autoRateNote: 'The success rate counts only runs whose outcome is known. A run that ended early is not a failure - Home Assistant records a false condition and a break: with the same reason and keeps nothing that separates them, so it is listed apart rather than guessed at. A trigger that evaluated a change and declined to fire is not a run at all.',
     autoObserved: (p) => `Seen while reading: ${p.buckets} trace bucket(s), ${p.runs} stored run(s), ${p.unmatched} run(s) that matched no automation.`,
+    autoUnmatchedIds: (p) => `The ${p.ids} above are the ids those runs are stored under. If every automation here says unmeasured while this list is not empty, the mapping is wrong - and these are the names to check it against.`,
+    autoObservedIncomplete: (p) => `Part of this could not be read: ${p.why} The numbers above are therefore lower bounds, not the whole picture.`,
+    autoNoBucketKey: "the trace component's bucket key could not be resolved",
+    autoNoBucketStore: "the trace bucket store was not present in hass.data",
+    autoNoStorageRead: "the saved-traces file could not be read",
+    autoEnumerateFailed: (p) => `The automations could not be listed, so nothing below is complete: ${p.why}`,
     autoObservedStored: (p) => `Saved to disk: ${p.keys} key(s), ${p.runs} run(s). Trace buckets are only written when Home Assistant stops, so this file trails the live store until then - it being smaller than the count above is expected, and it being larger would mean a run was restored from it.`,
     autoOutcomeOk: 'last run OK', autoOutcomeFailed: 'last run FAILED',
     autoOutcomeAborted: 'ended early', autoOutcomeRunning: 'running',
@@ -5013,6 +5043,12 @@ const I18N = {
     autoStatNotTriggered: (p) => `${p.n} 次触发未命中`,
     autoRateNote: '成功率只统计结局已知的运行。提前结束不算失败 —— HA 把「条件为假」和「break:」记成同一个原因（aborted），也不保留任何能区分它们的信息，所以这里单列而不替它下结论。触发器评估了但没触发的记录不算一次运行。',
     autoObserved: (p) => `本次读取实际看到：${p.buckets} 个 trace 桶、${p.runs} 条已存运行、${p.unmatched} 条没能对上任何自动化。`,
+    autoUnmatchedIds: (p) => `那些运行就存放在 ${p.ids} 这些 id 下。如果这里所有自动化都是「未测量」而这个列表不为空，那就是映射错了 —— 拿这些名字去核对。`,
+    autoObservedIncomplete: (p) => `其中一部分没能读到：${p.why} 所以上面的数字是下界，不是全貌。`,
+    autoNoBucketKey: 'trace 组件的桶键解析不出来',
+    autoNoBucketStore: 'hass.data 里没有 trace 桶存储',
+    autoNoStorageRead: '已保存的 trace 文件读不出来',
+    autoEnumerateFailed: (p) => `自动化列表读不出来，所以下面的内容都不完整：${p.why}`,
     autoObservedStored: (p) => `已落盘：${p.keys} 个键、${p.runs} 条运行。trace 桶只在 HA 停止时写盘，所以这个文件在停止之前一直落后于上面的实时计数 —— 比上面少是正常的，比上面多则说明有运行是从它恢复的。`,
     autoOutcomeOk: '上次成功', autoOutcomeFailed: '上次失败',
     autoOutcomeAborted: '提前结束', autoOutcomeRunning: '正在运行',
@@ -5470,7 +5506,7 @@ function buildLangMenu() {
   menu.innerHTML = LANGUAGES.map(l => `
     <div class="lang-option ${l.code === currentLang ? 'active' : ''}" id="langopt-${l.code}" onclick="setLang('${l.code}')">
       <span style="font-size:1.2rem">${l.flag}</span>
-      <span>${l.name}</span>
+      <span>${escapeHtml(l.name)}</span>
       <span class="check">✓</span>
     </div>
   `).join('');
@@ -6178,7 +6214,7 @@ document.addEventListener('DOMContentLoaded', () => {
      The strip prints both, and a mismatch becomes visible instead of having to
      be inferred. Bumped with the version; check_build_stamp keeps it in step
      with const.py. -->
-<script>const PANEL_FILE_BUILD = '1.7.25';
+<script>const PANEL_FILE_BUILD = '1.7.26';
        const EXPECTED_TAB_COUNT = 10;</script>
 <script>
 /* What this browser actually loaded, as facts. The file on disk was correct

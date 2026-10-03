@@ -109,6 +109,20 @@ def _trace_data_key():
 _DATA_TRACE_KEY = _trace_data_key()
 
 
+def _bucket_key():
+    """The bucket key, resolved on demand rather than once at import.
+
+    A one-shot resolution is permanently None if the import failed at import
+    time, and then every coverage number derived from it is 0 forever with
+    nothing on screen saying why - a confident wrong number, which is the
+    failure this whole module was rewritten to stop producing.
+    """
+    global _DATA_TRACE_KEY
+    if _DATA_TRACE_KEY is None:
+        _DATA_TRACE_KEY = _trace_data_key()
+    return _DATA_TRACE_KEY
+
+
 async def _load_traces(hass) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
     """Return the automations' traces, using the component's own API.
 
@@ -145,12 +159,20 @@ async def _load_traces(hass) -> tuple[list[dict[str, Any]], str, dict[str, Any]]
         await async_restore_traces(hass)
         # The buckets are read as a count, never as the data source: reading
         # the component's own storage is what is correct, and reading its
-        # private dictionary is the mistake this module used to make.
-        store = hass.data.get(_DATA_TRACE_KEY)
-        if isinstance(store, dict):
-            keys = [k for k in store if str(k).startswith("automation.")]
-            observed["buckets"] = len(keys)
-            observed["bucket_keys"] = keys[:20]
+        # private dictionary is the mistake this module used to make. If the
+        # key cannot be resolved the count is left at zero AND said to be
+        # unavailable, because a zero here would otherwise be indistinguishable
+        # from an instance that genuinely has no trace buckets.
+        if (key := _bucket_key()) is None:
+            observed["bucket_key_missing"] = True
+        else:
+            store = hass.data.get(key)
+            if isinstance(store, dict):
+                keys = [k for k in store if str(k).startswith("automation.")]
+                observed["buckets"] = len(keys)
+                observed["bucket_keys"] = keys[:20]
+            else:
+                observed["buckets_unavailable"] = True
         traces = await async_list_traces(hass, "automation", None)
     except Exception as exc:  # noqa: BLE001
         _LOGGER.warning("Could not read traces: %s", exc)
@@ -167,11 +189,23 @@ async def _observe_storage(hass, observed: dict[str, Any]) -> None:
     empty file while buckets exist in memory is the normal state of a running
     instance. Reporting it as a second number, beside the in-memory one, is
     what makes that distinguishable from a file that was never written.
+
+    The key and version are imported from the trace component rather than
+    written here. This once hardcoded "trace.saved_traces" and 1, which is
+    exactly the failure this project has been fixing all along: a value from
+    memory that no compiler, type checker or syntax check can question, and
+    that would report a confident 0 if Home Assistant ever renamed it. An
+    import either works or raises, and a raise is reported in `observed`
+    instead of being read as "the file is empty".
     """
     try:
+        from homeassistant.components.trace import (  # noqa: PLC0415
+            STORAGE_KEY,
+            STORAGE_VERSION,
+        )
         from homeassistant.helpers.storage import Store  # noqa: PLC0415
 
-        raw = await Store(hass, 1, "trace.saved_traces").async_load() or {}
+        raw = await Store(hass, STORAGE_VERSION, STORAGE_KEY).async_load() or {}
         if isinstance(raw, dict):
             observed["storage_keys"] = len(raw)
             observed["storage_runs"] = sum(
@@ -357,7 +391,6 @@ def classify(trace_dict: dict[str, Any]) -> dict[str, Any]:
         "finish": ts.get("finish"),
         "last_step": trace_dict.get("last_step"),
         "run_id": trace_dict.get("run_id"),
-        "item_id": trace_dict.get("item_id"),
     }
 
 
@@ -567,10 +600,25 @@ class AutomationRunAnalyzer:
             elif r["outcome"] in (OUTCOME_OK, OUTCOME_RUNNING, OUTCOME_ABORTED):
                 break
 
-        diagnosis = None
-        if failures:
-            latest_error = next((r["error"] for r in failures if r.get("error")), None)
-            diagnosis = diagnose(latest_error)
+        # The newest failure, and the error that goes with it, come from ONE
+        # list. They used to come from two: `last_error` took failures[0] in
+        # arrival order while `diagnosis` took the first failure that had error
+        # text, so a row could show a null error next to a diagnosis derived
+        # from a different run. Ordering by start time also makes "the latest
+        # failure" mean that, rather than "whichever the store happened to
+        # yield first" - a LimitedSizeDict yields insertion order, which stops
+        # being chronological once entries are evicted.
+        failures.sort(key=lambda r: str(r.get("start") or ""), reverse=True)
+        latest_failure = failures[0] if failures else None
+        last_error = latest_failure.get("error") if latest_failure else None
+        diagnosis = diagnose(last_error)
+        # A reason this code does not recognise is named rather than smoothed
+        # over: Home Assistant can add one, and "finished" would be a confident
+        # answer to a question nobody asked.
+        unknown_reasons = sorted({
+            r.get("reason") for r in real_runs
+            if r.get("reason") and not r.get("reason_known", True)
+        })
 
         return {
             "automation_id": automation_id,
@@ -591,10 +639,10 @@ class AutomationRunAnalyzer:
             "successes": len(ok),
             "last_outcome": last["outcome"] if last else OUTCOME_UNKNOWN,
             "last_run": last.get("start") if last else None,
-            "last_reason": last.get("reason") if last else None,
-            "last_error": failures[0].get("error") if failures else None,
+            "last_error": last_error,
             "consecutive_failures": consecutive,
             "diagnosis": diagnosis,
+            "unknown_reasons": unknown_reasons,
         }
 
     def _summary(self, rows: list[dict[str, Any]]) -> dict[str, Any]:

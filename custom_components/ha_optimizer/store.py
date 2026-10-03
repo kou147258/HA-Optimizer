@@ -264,7 +264,18 @@ class PurgeStore:
         return dict(self._soft_data)
 
     async def async_get_expired_soft_deleted(self, days: int) -> list[str]:
-        """Return entity_ids that have been soft-deleted longer than `days`."""
+        """Return entity_ids that have been soft-deleted longer than `days`.
+
+        `days` of 0 or less means NOTHING expires, and that is what the
+        documentation promises: "set soft_delete_days: 0 if you would rather
+        empty it yourself". The rule below was a bare `age >= days`, so with 0
+        every entry qualified the instant it was written - a documented
+        off-switch that mass hard-deletes the whole trash. The options flow
+        also refuses 0 (`vol.Range(min=1)`), so the switch was unreachable by
+        the documented route and destructive by every other one.
+        """
+        if days <= 0:
+            return []
         now = dt_util.utcnow()
         expired = []
         for eid, meta in self._soft_data.items():

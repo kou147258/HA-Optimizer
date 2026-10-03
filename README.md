@@ -1,7 +1,7 @@
 # 🧹 HA Optimizer
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![version](https://img.shields.io/badge/version-1.7.25-blue)
+![version](https://img.shields.io/badge/version-1.7.26-blue)
 ![HA](https://img.shields.io/badge/Home%20Assistant-2024.11+-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.11+-yellow)
@@ -394,7 +394,7 @@ Every soft delete lands in the trash, where it stays disabled and reversible. Th
 
 The asymmetry is the point. Restoring everything is the undo button for a purge that removed the wrong batch, so it should be one click away. Emptying the trash is the one bulk action here that cannot be undone and leaves no second copy, so one Enter key is not enough of a gate.
 
-**The automatic expiry stays on as a floor** — after `soft_delete_days` (default 30) an entry in the trash is removed even if you never touch it, with a warning log, a persistent notification and an event. The countdown column makes that visible instead of surprising. Set `soft_delete_days: 0` if you would rather empty it yourself.
+**The automatic expiry stays on as a floor** — after `soft_delete_days` (default 7) an entry in the trash is removed even if you never touch it, with a warning log, a persistent notification and an event. The countdown column makes that visible instead of surprising. Set `soft_delete_days: 0` if you would rather empty it yourself.
 
 Anything a bulk operation *could not* really remove — a YAML-only automation, a safety device class — **stays in the trash** and is reported, rather than being reported as gone. A disabled entity nobody tracks is a ghost that nothing would ever restore or finish.
 
