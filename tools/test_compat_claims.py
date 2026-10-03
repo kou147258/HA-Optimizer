@@ -102,9 +102,16 @@ check("the fallback is documented where it lives",
 # ═══ 3. a trash snapshot must outlive the scan that produced it ══════════════
 print("\ntrash snapshots survive a re-scan")
 save = store[store.index("async def async_save_scan_results"):]
-save = save[:save.index("\n    async def ")]
+# The save is a wrapper that takes the lock and delegates to a merge-aware
+# helper, so the explanation that used to sit on the wrapper now sits on the
+# helper. The invariant is "the reason is written down on the save path", not
+# "on this particular function". Stop at the second `async def` - the helper -
+# so the slice does not run on into async_add_soft_deleted, which legitimately
+# touches _soft_data and would make this check fail for the right code.
+_parts = save.split("\n    async def ")
+save = _parts[0] + ("\n    async def " + _parts[1] if len(_parts) > 1 else "")
 check("saving new scan results does not touch the soft-delete records",
-      "_soft_data" not in save.replace("# _soft_data", "").split('"""')[0] + save.split('"""')[-1],
+      "_soft_data" not in re.sub(r'""".*?"""', "", save, flags=re.S),
       "a disabled entity is never re-scanned, so pruning its snapshot here "
       "would silently break restore")
 check("the reason is written down at the call site",

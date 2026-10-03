@@ -950,7 +950,7 @@ class DashboardAnalyzer:
             storage_dir = os.path.join(self.hass.config.config_dir, ".storage")
             lovelace_files = glob.glob(os.path.join(storage_dir, "lovelace*"))
 
-            registered_custom_cards = self._get_registered_custom_cards(storage_dir)
+            registered_custom_cards, custom_cards_known = self._get_registered_custom_cards(storage_dir)
 
             all_state_ids  = {s.entity_id for s in self.hass.states.async_all()}
             unavail_states = {
@@ -1061,7 +1061,7 @@ class DashboardAnalyzer:
                         # 2. Custom card chưa cài
                         if card_type.startswith("custom:"):
                             view_custom_count += 1
-                            if card_type not in registered_custom_cards:
+                            if not custom_cards_known:                                # An unreadable resource file is not evidence that no custom cards                                # are registered. The old code produced an empty set on failure and                                # this branch then listed every custom card on the dashboard as                                # unconfigured - accusing a working setup on the strength of a file                                # we could not open. Not knowing is not the same as not existing.                                result["custom_cards_unchecked"] = (                                    "The custom-card resource list could not be read, so no card "                                    "was judged here. Check Lovelace resources by hand."                                )                            elif card_type not in registered_custom_cards:
                                 result["unconfigured_custom_cards"].append({
                                     "dashboard": dash_name,
                                     "view": view_title,
@@ -1469,9 +1469,22 @@ class DashboardAnalyzer:
                 found.append(style_key)
         return found
 
-    def _get_registered_custom_cards(self, storage_dir: str) -> set[str]:
+    def _get_registered_custom_cards(self, storage_dir: str) -> tuple[set[str], bool]:
+        """Registered custom cards, and whether that list can be trusted.
+
+        The bool is the point. This used to return a set and nothing else, so a
+        failed read produced an EMPTY set - and the caller treats "not in the
+        registered set" as "this custom card was never configured", which then
+        listed every custom card on the dashboard as unconfigured. An
+        unreadable file is not evidence that nothing is registered; reporting it
+        as though it were accuses a working setup on the strength of a file we
+        could not open.
+
+        Returns (known, complete).
+        """
         import json, os
         known: set[str] = set()
+        complete = True
         resource_file = os.path.join(storage_dir, "lovelace_resources")
         if os.path.exists(resource_file):
             try:
@@ -1483,7 +1496,11 @@ class DashboardAnalyzer:
                     if filename:
                         known.add(f"custom:{filename}")
             except Exception as e:
-                _LOGGER.debug("Cannot read lovelace_resources: %s", e)
+                complete = False
+                _LOGGER.warning(
+                    "Cannot read lovelace_resources (%s); custom cards will not be "
+                    "checked this run rather than being reported as unconfigured", e,
+                )
         frontend_file = os.path.join(storage_dir, "lovelace.hacs_dashboard")
         if os.path.exists(frontend_file):
             try:
@@ -1494,65 +1511,18 @@ class DashboardAnalyzer:
                     filename = url.rstrip("/").split("/")[-1].replace(".js", "")
                     if filename:
                         known.add(f"custom:{filename}")
-            except Exception:
-                pass
-        return known
+            except Exception as e:
+                complete = False
+                _LOGGER.warning(
+                    "Cannot read lovelace.hacs_dashboard (%s); custom cards will "
+                    "not be checked this run rather than being reported as "
+                    "unconfigured", e,
+                )
+        if not (os.path.exists(resource_file) or os.path.exists(frontend_file)):
+            # Nothing to read is a normal state, not a failure.
+            complete = True
+        return known, complete
 
-    def _build_summary(self, result: dict) -> dict:
-        issues: list[dict] = []
-
-        def _add(severity, category, count, label):
-            if count > 0:
-                issues.append({"severity": severity, "category": category,
-                                "count": count, "label": label})
-
-        c_heavy = sum(1 for c in result["heavy_cards"]    if c.get("severity") == "critical")
-        w_heavy = sum(1 for c in result["heavy_cards"]    if c.get("severity") == "warning")
-        _add("critical", "heavy_cards",       c_heavy,
-             {"key": "dash_critical_heavy", "params": {"n": c_heavy}})
-        _add("warning",  "heavy_cards",       w_heavy,
-             {"key": "dash_warning_heavy", "params": {"n": w_heavy}})
-        _add("critical", "overloaded_views",
-             sum(1 for v in result["overloaded_views"] if v["severity"] == "critical"),
-             "dash_overloaded_critical")
-        _add("warning",  "overloaded_views",
-             sum(1 for v in result["overloaded_views"] if v["severity"] == "warning"),
-             "dash_overloaded_warning")
-        _add("critical", "missing_entities",  len(result["missing_entities"]),       "dash_missing_entities")
-        _add("warning",  "unavailable_entities", len(result["unavailable_entities"]), "dash_unavail_entities")
-        _add("warning",  "duplicate_entities",len(result["duplicate_entities"]),     "dash_duplicate_entities")
-        _add("warning",  "heavy_graphs",      len(result["heavy_graphs"]),           "dash_heavy_graphs")
-        _add("warning",  "unconfigured_custom_cards", len(result["unconfigured_custom_cards"]), "dash_unconfigured_cards")
-        _add("info",     "template_heavy_cards", len(result["template_heavy_cards"]), "dash_template_cards")
-        # NEW
-        _add("critical", "view_complexity",
-             sum(1 for v in result["view_complexity"] if v["severity"] == "critical"),
-             "dash_complexity_critical")
-        _add("warning",  "view_complexity",
-             sum(1 for v in result["view_complexity"] if v["severity"] == "warning"),
-             "dash_complexity_warning")
-        _add("critical", "ws_pressure",
-             sum(1 for w in result["ws_pressure"]     if w["severity"] == "critical"),
-             "dash_ws_critical")
-        _add("warning",  "ws_pressure",
-             sum(1 for w in result["ws_pressure"]     if w["severity"] == "warning"),
-             "dash_ws_warning")
-        _add("critical", "recorder_crossref",
-             sum(1 for r in result["recorder_crossref"] if r["severity"] == "critical"),
-             "dash_xref_critical")
-        _add("warning",  "recorder_crossref",
-             sum(1 for r in result["recorder_crossref"] if r["severity"] == "warning"),
-             "dash_xref_warning")
-
-        total_critical = sum(1 for i in issues if i["severity"] == "critical")
-        total_warning  = sum(1 for i in issues if i["severity"] == "warning")
-
-        return {
-            "issues":          issues,
-            "total_critical":  total_critical,
-            "total_warning":   total_warning,
-            "dashboard_score": max(0, 100 - total_critical * 10 - total_warning * 4),
-        }
 
 
 # ================================================================

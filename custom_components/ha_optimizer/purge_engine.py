@@ -318,42 +318,58 @@ class PurgeEngine:
             return "disabled"
 
     async def async_get_dependency_map(self, entity_id: str) -> dict[str, Any]:
-        """Get all places where an entity is referenced (for impact analysis)."""
-        deps = {
+        """Where is this entity referenced?
+
+        Two honest limits, both stated in the return value rather than left
+        for the reader to guess:
+
+        * this is a HEURISTIC. It looks for the entity id inside other
+          entities' attributes. It cannot see a reference buried in a
+          dashboard's YAML, in a package, in a template, or in an automation
+          that has not been loaded yet.
+        * dashboards are not scanned at all, at runtime.
+
+        Both used to be hidden. The automation branch called
+        `automation.config`, threw the result away, and swallowed any
+        failure - so a broken call looked exactly like a clean one, and the
+        map came back looking authoritative while being a string search.
+        """
+        deps: dict[str, Any] = {
             "automations": [],
             "scripts": [],
             "groups": [],
             "dashboards": "Cannot be scanned at runtime - check manually",
+            # Consumed by the panel: it now says so instead of implying the
+            # list below is exhaustive.
+            "complete": False,
+            "method": "heuristic: entity id matched inside other entities' attributes",
         }
 
-        # Check automations
-        for state in self.hass.states.async_all("automation"):
-            automation_id = state.entity_id
-            # Check the automation's config via service
-            try:
-                result = await self.hass.services.async_call(
-                    "automation",
-                    "config",
-                    {"entity_id": automation_id},
-                    blocking=True,
-                    return_response=True,
-                )
-            except Exception:
-                pass
-
-        # Simple check: scan all state attributes
         for state in self.hass.states.async_all():
-            attrs_str = str(state.attributes)
-            if entity_id in attrs_str:
-                domain = state.entity_id.split(".")[0]
-                if domain == "automation":
-                    deps["automations"].append(state.entity_id)
-                elif domain == "script":
-                    deps["scripts"].append(state.entity_id)
-                elif domain == "group":
-                    deps["groups"].append(state.entity_id)
+            attrs = state.attributes
+            if not isinstance(attrs, dict):
+                continue
+            domain = state.entity_id.split(".")[0]
+            if domain not in ("automation", "script", "group"):
+                continue
+            # Token-aware: a bare substring test makes sensor.a match
+            # sensor.ab, and the impact dialog would then list automations
+            # that have nothing to do with the entity being deleted.
+            for value in attrs.values():
+                if not isinstance(value, str):
+                    continue
+                if entity_id not in value:
+                    continue
+                parts = {p.strip("\"'[]() ,") for p in value.replace(";", ",").split(",")}
+                if entity_id in parts:
+                    bucket = {"automation": "automations", "script": "scripts",
+                              "group": "groups"}[domain]
+                    if state.entity_id not in deps[bucket]:
+                        deps[bucket].append(state.entity_id)
+                    break
 
         return deps
+
 
 
 # Device classes that must never be removed here. This used to be a second,

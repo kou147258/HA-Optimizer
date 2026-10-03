@@ -67,6 +67,12 @@ jobs:
       - name: Safety gate checks can still fail
         run: python3 tools/counterproof_safety_gate.py
 
+      - name: Store concurrency and merge checks
+        run: python3 tools/test_store_concurrency.py
+
+      - name: Fail-loud checks and whole-file mechanical sweep
+        run: python3 tools/test_fail_loud.py
+
       - name: Compatibility claim checks
         run: python3 tools/test_compat_claims.py
 
