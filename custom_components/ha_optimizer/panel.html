@@ -2767,10 +2767,17 @@ function renderAutomationRuns(host, d) {
     const lastRun = a.last_run ? new Date(a.last_run).toLocaleString(_panelLocale())
       : (a.last_triggered ? new Date(a.last_triggered).toLocaleString(_panelLocale()) : '—');
     // last_triggered is the fact that exists for EVERY automation; the run
-    // outcome only exists for traced ones. Saying which is which is the point.
+    // outcome only exists for ones with a stored trace. So the sentence below
+    // is told apart by whether last_triggered is there: without it, "nothing
+    // stored" is all the truth there is; with it, the two facts contradict
+    // each other and the contradiction is what gets said. An earlier version
+    // claimed "it has not run since Home Assistant started" while printing
+    // the run time from yesterday directly above it.
     if (a.last_outcome === 'untraced') {
       detail += `<div style="margin-top:4px; font-size:0.78rem; color:var(--text-muted)">
-        ${escapeHtml(t('autoNoRunsStored'))}</div>`;
+        ${escapeHtml(a.last_triggered
+          ? t('autoNoRunButTriggered', { when: lastRun })
+          : t('autoNoRunsStored'))}</div>`;
     }
     html += `<div class="auto-row">
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap">
@@ -4500,7 +4507,7 @@ const I18N = {
     autoStatNotTriggered: (p) => `${p.n} trigger checks declined`,
     autoRateNote: 'The success rate counts only runs whose outcome is known. A run that ended early is not a failure - Home Assistant records a false condition and a break: with the same reason and keeps nothing that separates them, so it is listed apart rather than guessed at. A trigger that evaluated a change and declined to fire is not a run at all.',
     autoObserved: (p) => `Seen while reading: ${p.buckets} trace bucket(s), ${p.runs} stored run(s), ${p.unmatched} run(s) that matched no automation.`,
-    autoObservedStored: (p) => `Saved to disk: ${p.keys} key(s), ${p.runs} run(s) - trace buckets are only written when Home Assistant stops, so an empty file while buckets exist in memory is normal.`,
+    autoObservedStored: (p) => `Saved to disk: ${p.keys} key(s), ${p.runs} run(s). Trace buckets are only written when Home Assistant stops, so this file trails the live store until then - it being smaller than the count above is expected, and it being larger would mean a run was restored from it.`,
     autoOutcomeOk: 'last run OK', autoOutcomeFailed: 'last run FAILED',
     autoOutcomeAborted: 'ended early', autoOutcomeRunning: 'running',
     autoOutcomeUnknown: 'no run recorded',
@@ -4508,7 +4515,8 @@ const I18N = {
     autoCoverUnavailable: 'This Home Assistant version has no trace component, so run outcomes cannot be read at all.',
     autoCoverEmpty: 'Home Assistant keeps the last 5 runs of every automation, so an empty store means none of them has run since Home Assistant last started - or that this could not read the store at all. The counts above say which.',
     autoOutcomeUntraced: 'not measured',
-    autoNoRunsStored: 'No stored run for this one. Home Assistant keeps the last 5 runs of every automation, so it means the automation has not run since Home Assistant last started - not that it is broken.',
+    autoNoRunsStored: 'No stored run, and Home Assistant has never recorded a trigger for it either - so it has not run since Home Assistant last started, or it has never run at all.',
+    autoNoRunButTriggered: (p) => `No stored run, yet Home Assistant recorded its last trigger at ${p.when} - so that run did not reach this store. Not a contradiction: it triggered, and its trace is not here. Worth checking whether its YAML sets stored_traces: 0.`,
     autoStatUntraced: (p) => `${p.n} not measured`,
     autoOff: 'currently off',
     autoNoTraces: 'Home Assistant trace data is not available on this instance, so run outcomes are unknown - not "healthy". Traces are recorded once automations have run.',
@@ -5005,7 +5013,7 @@ const I18N = {
     autoStatNotTriggered: (p) => `${p.n} 次触发未命中`,
     autoRateNote: '成功率只统计结局已知的运行。提前结束不算失败 —— HA 把「条件为假」和「break:」记成同一个原因（aborted），也不保留任何能区分它们的信息，所以这里单列而不替它下结论。触发器评估了但没触发的记录不算一次运行。',
     autoObserved: (p) => `本次读取实际看到：${p.buckets} 个 trace 桶、${p.runs} 条已存运行、${p.unmatched} 条没能对上任何自动化。`,
-    autoObservedStored: (p) => `已落盘：${p.keys} 个键、${p.runs} 条运行 —— trace 桶只在 HA 停止时写盘，所以「内存里有、文件里空」是正常状态。`,
+    autoObservedStored: (p) => `已落盘：${p.keys} 个键、${p.runs} 条运行。trace 桶只在 HA 停止时写盘，所以这个文件在停止之前一直落后于上面的实时计数 —— 比上面少是正常的，比上面多则说明有运行是从它恢复的。`,
     autoOutcomeOk: '上次成功', autoOutcomeFailed: '上次失败',
     autoOutcomeAborted: '提前结束', autoOutcomeRunning: '正在运行',
     autoOutcomeUnknown: '没有运行记录',
@@ -5013,7 +5021,8 @@ const I18N = {
     autoCoverUnavailable: '这个 Home Assistant 版本没有 trace 组件，读不到任何运行结局。',
     autoCoverEmpty: 'HA 为每个自动化保留最近 5 次运行，所以存储为空意味着它们自 HA 上次启动以来没运行过 —— 或者这次根本没读到存储。上面那组数字会告诉你是哪一种。',
     autoOutcomeUntraced: '未测量',
-    autoNoRunsStored: '这个自动化没有已存的运行。HA 为每个自动化保留最近 5 次运行，所以这说明它自上次启动以来没跑过 —— 不是它坏了。',
+    autoNoRunsStored: '没有已存的运行，而且 HA 也从未记录过它的触发 —— 所以它自上次启动以来没跑过，或者从来没跑过。',
+    autoNoRunButTriggered: (p) => `没有已存的运行，但 HA 记录的最近一次触发是 ${p.when} —— 那次运行没有留在这个存储里。这两件事不矛盾：是「触发过但 trace 不在这里」；值得查一下它的 YAML 有没有设 stored_traces: 0。`,
     autoStatUntraced: (p) => `${p.n} 个未测量`,
     autoOff: '当前已关闭',
     autoNoTraces: '这个实例上没有 Home Assistant 的 trace 数据，所以运行结局是「未知」，不是「健康」。trace 要等自动化实际运行过才会有。',
@@ -6169,7 +6178,7 @@ document.addEventListener('DOMContentLoaded', () => {
      The strip prints both, and a mismatch becomes visible instead of having to
      be inferred. Bumped with the version; check_build_stamp keeps it in step
      with const.py. -->
-<script>const PANEL_FILE_BUILD = '1.7.24';
+<script>const PANEL_FILE_BUILD = '1.7.25';
        const EXPECTED_TAB_COUNT = 10;</script>
 <script>
 /* What this browser actually loaded, as facts. The file on disk was correct

@@ -265,12 +265,6 @@ check("coverage lists the bucket keys, so an empty page can be argued with",
       sorted(observed["bucket_keys"]) == ["automation.11111", "automation.8f2c1d"],
       f"got {observed['bucket_keys']}")
 
-ok = sum(1 for r in results if r[0])
-print()
-print(f"{ok}/{len(results)} passed")
-print("FAILED" if ok != len(results) else "PASSED")
-sys.exit(0 if ok == len(results) else 1)
-
 # ── diagnosis must not take the page down ───────────────────────────────────
 # This line had never run in production, and when it finally did it raised:
 # the rule table held tuples of patterns and the code called `.split()` on one.
@@ -289,6 +283,19 @@ check("a wildcard rule reports the text it matched",
       "not found" in missing.get("matched", ""), f"got {missing.get('matched')!r}")
 check("an unrecognised error is reported as unclassified, not invented",
       (D("something nobody has a rule for") or {})["id"] == "unclassified")
+# Four of the nine runs on a real instance failed with exactly this, so the
+# page called it "no rule matched" and offered nothing. The error names the
+# key and where it was expected, which is enough to say what kind of thing it
+# is without guessing which service was called.
+missing_key = D("required key not provided @ data['json']") or {}
+check("a missing payload key is diagnosed",
+      missing_key["id"] == "missing_key", f"got {missing_key['id']}")
+check("it reports the key the error named",
+      "required key not provided" in missing_key.get("matched", ""),
+      f"got {missing_key.get('matched')!r}")
+check("the missing-key rule does not swallow other errors",
+      (D("Error executing template: x is undefined") or {})["id"] == "template",
+      f"got {(D('Error executing template: x is undefined') or {})['id']}")
 check("no error text yields no diagnosis at all", D(None) is None)
 check("a non-string error does not raise", D({"weird": True}) is None)
 bad_rule = spec.DIAGNOSES[0]

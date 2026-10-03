@@ -235,6 +235,10 @@ TOOL_CHECKS: list[tuple[str, str, list[str]]] = [
     ("source.recorder_sql", "SQL columns exist in the recorder schema", ["test_recorder_sql.py"]),
     ("source.recorder_sql.cp", "recorder-SQL checks can still fail",
      ["counterproof_recorder_sql.py"]),
+    ("tools.reach_verdict", "no tool ends its run before its own assertions",
+     ["test_check_tools.py"]),
+    ("tools.reach_verdict.cp", "the unreachable-tail check can still fail",
+     ["counterproof_check_tools.py"]),
 ]
 
 

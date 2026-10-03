@@ -195,8 +195,9 @@ DIAGNOSES: list[dict[str, Any]] = [
     {
         "id": "template",
         "match": (r"template variable error", r"undefinederror",
-                  r"has no attribute", r"template render", r"has no key",
-                  r"jinja2?\b.*error"),
+                  r"has no attribute", r"template render",
+                  r"executing template", r"rendering template",
+                  r"has no key", r"jinja2?\b.*error"),
         "suggestion": "A template evaluated to an error. Test it in the template editor "
                       "with the same variables the trigger supplies - the trace's "
                       "changed_variables tab shows what the trigger actually passed.",
@@ -226,6 +227,17 @@ DIAGNOSES: list[dict[str, Any]] = [
         "suggestion": "The action needs an administrator context. Scripts and automations "
                       "run as the user that started them, so a service now restricted to "
                       "admins will fail for a non-admin start.",
+    },
+    {
+        "id": "missing_key",
+        "match": (r"required key not provided", r"key '[^']+' not provided",
+                  r"required argument '[^']+'"),
+        "suggestion": "An action called a service with a data payload that is missing a "
+                      "key the service requires - the error names the key and where it "
+                      "was expected, so compare the action's data block with that "
+                      "service's schema rather than with the integration's docs. On a "
+                      "service that takes a raw body, the payload is usually nested "
+                      "differently from what the action passes.",
     },
     {
         "id": "timeout",
@@ -462,13 +474,15 @@ class AutomationRunAnalyzer:
             row["last_triggered"] = meta.get("last_triggered")
             row["enabled"] = meta.get("enabled")
             if not row["traced"]:
+                # No prose here. The panel already has `last_triggered`, and
+                # whether that is present changes what can honestly be said:
+                # an automation with a trigger time and no stored run is a
+                # different fact from one that has never triggered. So the
+                # sentence is composed there, from the two facts side by side,
+                # and this field used to carry - unread - a flat claim that it
+                # "has not run since Home Assistant last started", which the
+                # row's own last-triggered time contradicts.
                 row["last_outcome"] = "untraced"
-                row["unmeasured_reason"] = (
-                    "No stored run for this automation. Home Assistant keeps the "
-                    "last 5 runs of every automation, so this means it has not run "
-                    "since Home Assistant last started - not that it is broken. "
-                    "The coverage figures say which of the two it is."
-                )
             rows.append(row)
 
         # Failures first, then the ones we cannot judge, then the healthy.
