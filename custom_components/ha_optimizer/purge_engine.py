@@ -37,6 +37,11 @@ class PurgeEngine:
             "yaml_manual": [],
             "disabled_only": [],       # delete FAILED, only disabled — kept tracked
             "skipped_high_risk": [],   # device class forbids removing it
+            # Not in the registry, and not removable by domain either. Nothing
+            # was deleted, so this is never a success on its own; whether it is
+            # a failure or a stale record depends on which path asked, so the
+            # caller decides.
+            "already_gone": [],
         }
 
         ent_reg = er.async_get(self.hass)
@@ -64,10 +69,16 @@ class PurgeEngine:
                     elif outcome == "disabled":
                         results["disabled_only"].append(entity_id)
                     else:
-                        results["failed"].append({
-                            "entity_id": entity_id,
-                            "error": "Not found in registry and not removable",
-                        })
+                        # Not in the registry, and `_remove_by_domain` could not
+                        # remove it either - which is what it returns for every
+                        # domain other than automation and script. This is NOT
+                        # reported as a deletion, because nothing was deleted.
+                        # It is also not a plain failure, because for a trash
+                        # record it means the entity is already gone and the
+                        # record is the stale thing;
+                        # `async_hard_delete_soft_deleted` decides that, and a
+                        # fresh purge reports it as a failure.
+                        results["already_gone"].append(entity_id)
                     continue
 
                 # For automations and scripts, always use domain-specific deletion
@@ -278,8 +289,25 @@ class PurgeEngine:
         return False
 
     async def async_hard_delete_soft_deleted(self, entity_ids: list[str]) -> dict[str, Any]:
-        """Permanently remove entities that have been soft-deleted."""
-        return await self.async_purge_entities(entity_ids, soft_delete=False)
+        """Permanently remove entities that have been soft-deleted.
+
+        An entity that is no longer in the registry is counted as removed here,
+        and only here. A trash record whose entity has vanished - hard-deleted
+        by the user or by another integration - describes something that is
+        already gone, so keeping the record forever would leave the user with a
+        trash they can never empty and a permanent notification reappearing on
+        every tick. In the ordinary purge path the same situation is a failure,
+        because nothing was deleted there; that is why the two paths differ, and
+        why the distinction is made here rather than in the engine.
+        """
+        result = await self.async_purge_entities(entity_ids, soft_delete=False)
+        gone = list(result.get("already_gone", []))
+        if gone:
+            result["success"] = list(result.get("success", [])) + gone
+            result["already_gone"] = gone
+            result["failed"] = [f for f in result.get("failed", [])
+                                if f.get("entity_id") not in set(gone)]
+        return result
 
     async def _remove_by_domain(self, entity_id: str) -> str:
         """Remove an automation/script through its config entry.

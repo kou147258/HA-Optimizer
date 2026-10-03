@@ -314,9 +314,22 @@ JS_BUILTIN = {
 
 
 def _skip_template(js: str, i: int) -> int:
-    """Index just past the template literal whose opening backtick is at i."""
+    """Deprecated alias kept only so nothing else has to know about the change."""
+    return _template(js, i, [])
+
+
+def _template(js: str, i: int, out: list) -> int:
+    """Emit a template literal with its TEXT blanked and its ${ } KEPT.
+
+    Blanking the whole literal is what the previous version did, and it is why
+    the check could not see code at all: this panel builds nearly its entire
+    DOM inside `${ }`, so the region holding the calls worth checking was the
+    region being erased. A bare undefined call placed in an interpolation went
+    unseen, which was measured rather than assumed.
+    """
     n = len(js)
     i += 1
+    out.append(" ")
     while i < n:
         c = js[i]
         if c == "\\":
@@ -325,16 +338,25 @@ def _skip_template(js: str, i: int) -> int:
         if c == "`":
             return i + 1
         if c == "$" and i + 1 < n and js[i + 1] == "{":
-            i = _skip_expr(js, i + 2)
+            i = _skip_expr(js, i + 2, out)
+            # A separator. Without it `${a()}${b()}` emits `a()b()`, and the
+            # check then reported `sevIconescapeHtml` and other names that are
+            # two identifiers glued together - a false positive invented by the
+            # stripper, which is worse than the blind spot it closed.
+            out.append(" ")
             continue
         i += 1
     return n
 
 
-def _skip_expr(js: str, i: int) -> int:
-    """Index of the '}' closing a `${` whose body starts at i."""
+def _skip_expr(js: str, i: int, out: list) -> int:
+    """Emit the body of a `${`, blanking the literals inside it.
+
+    Returns the index of the `}` that closes it.
+    """
     n = len(js)
     depth = 1
+    start = i
     while i < n:
         c = js[i]
         if c == "\\":
@@ -346,9 +368,10 @@ def _skip_expr(js: str, i: int) -> int:
             while i < n and js[i] != q:
                 i += 2 if js[i] == "\\" else 1
             i += 1
+            out.append(" ")
             continue
         if c == "`":
-            i = _skip_template(js, i)
+            i = _template(js, i, out)
             continue
         if c == "/" and i + 1 < n and js[i + 1] == "/":
             j = js.find("\n", i)
@@ -363,8 +386,10 @@ def _skip_expr(js: str, i: int) -> int:
         elif c == "}":
             depth -= 1
             if depth == 0:
+                out.append(js[start:i])
                 return i
         i += 1
+    out.append(js[start:n])
     return n
 
 
@@ -406,7 +431,7 @@ def _strip_literals(js: str) -> str:
             out.append(" ")
             continue
         if c == "`":
-            i = _skip_template(js, i)
+            i = _template(js, i, out)
             out.append(" ")
             continue
         out.append(c)

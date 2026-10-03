@@ -71,6 +71,29 @@ def bare_exit_at_top_level(tree: ast.Module) -> int | None:
     return None
 
 
+def _unguarded_exits(tree: ast.Module) -> list[ast.Call]:
+    """The exits that end the run whatever happens.
+
+    A bare `sys.exit(...)` as a top-level statement, and any exit inside a
+    top-level compound statement, is a verdict: exactly one is wanted, because a
+    second one is unreachable. An exit inside a `def` is not one of these - it
+    belongs to a function, usually an `if __name__` guard, and is not a verdict
+    for the module.
+
+    The first version of this asked "is this exit inside a branch?" by walking
+    the whole tree, and Module.body matched itself, so every exit counted as
+    guarded and every tool reported zero.
+    """
+    out: list[ast.Call] = []
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Expr) and is_exit(stmt.value):
+            out.append(stmt.value)
+        elif isinstance(stmt, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try,
+                               ast.With, ast.AsyncWith)):
+            out.extend(node for node in ast.walk(stmt) if is_exit(node))
+    return out
+
+
 tools = sorted(p for p in TOOLS.glob("*.py")
                if p.name.startswith(("test_", "counterproof_", "check_"))
                and p.name != Path(__file__).name)
@@ -90,23 +113,21 @@ for path in tools:
     calls = exit_calls(tree)
     idx = bare_exit_at_top_level(tree)
 
-    if not calls:
-        # Tools that end in `sys.exit(main())` through a function, or simply
-        # fall off the end, are fine. Requiring a particular verdict string
-        # here would be a style assumption, and this file has already learned
-        # that a check which reports problems it does not have is worse than
-        # no check: half the tools print "OK - ..." rather than "PASSED", and
-        # they were all reported as broken. The structural rules below are the
-        # ones that catch the real defect, so only those are asserted.
-        without_exit.append(str(rel))
-        continue
-
-    check(f"{rel} exits exactly once", len(calls) == 1,
-          f"{len(calls)} exit call(s) - the first one ends the run and the rest "
-          f"are dead code")
     if idx is None:
-        check(f"{rel} has no unreachable tail", True)
+        # A tool that ends through a function, or falls off the end, is fine.
+        # A conditional early exit - `if the anchor is not unique: exit` - is
+        # also fine, and refusing to run the cases at all is the right thing
+        # to do. Neither is a defect, so neither is asserted. This check once
+        # counted EVERY sys.exit and called a tool with two guard clauses plus
+        # its verdict "exits exactly once", which is not what it says.
+        without_exit.append(str(rel))
     else:
+        # Only the tail matters. There used to be a second rule here, "reaches
+        # its verdict through exactly one exit", and it was wrong twice: it
+        # counted a guard clause as a second verdict, and fixing that made it
+        # count zero. A module that aborts early and then has one final exit is
+        # correct. The defect worth catching is one shape only - module-level
+        # work after a top-level exit, which can never run.
         tail = tree.body[idx + 1:]
         check(f"{rel} has no unreachable tail", not tail,
               f"{len(tail)} module-level statement(s) after a top-level exit, "

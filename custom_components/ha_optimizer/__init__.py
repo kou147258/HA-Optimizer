@@ -594,7 +594,7 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
     async def handle_purge(call: ServiceCall):
         """Handle purge service call."""
         entity_ids = call.data.get("entity_ids", [])
-        soft = call.data.get("soft_delete", entry.options.get(CONF_ENABLE_SOFT_DELETE, DEFAULT_ENABLE_SOFT_DELETE))
+        soft = call.data.get("soft_delete", _entry_options(entry).get(CONF_ENABLE_SOFT_DELETE, DEFAULT_ENABLE_SOFT_DELETE))
         data = hass.data[DOMAIN][entry.entry_id]
         result = await data["engine"].async_purge_entities(entity_ids, soft_delete=soft)
 
@@ -813,7 +813,7 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
         data = hass.data[DOMAIN][entry.entry_id]
         scan = await data["store"].async_get_scan_results()
         soft = await data["store"].async_get_soft_deleted()
-        days = entry.options.get(CONF_SOFT_DELETE_DAYS, DEFAULT_SOFT_DELETE_DAYS)
+        days = _entry_options(entry).get(CONF_SOFT_DELETE_DAYS, DEFAULT_SOFT_DELETE_DAYS)
         now = dt_util.utcnow()
         for eid, meta in list(soft.items()):
             try:
@@ -1343,7 +1343,7 @@ def _schedule_daily_baseline(hass: HomeAssistant, entry: ConfigEntry):
 
 def _setup_auto_scan(hass: HomeAssistant, entry: ConfigEntry):
     """Set up periodic auto-scan if configured."""
-    interval_days = entry.options.get(CONF_SCAN_INTERVAL_DAYS, DEFAULT_SCAN_INTERVAL_DAYS)
+    interval_days = _entry_options(entry).get(CONF_SCAN_INTERVAL_DAYS, DEFAULT_SCAN_INTERVAL_DAYS)
     if interval_days <= 0:
         return
 
@@ -1412,7 +1412,7 @@ async def _async_check_soft_delete_expiry(hass: HomeAssistant, entry: ConfigEntr
     data = hass.data[DOMAIN].get(entry.entry_id)
     if not data:
         return
-    soft_days = entry.options.get(CONF_SOFT_DELETE_DAYS, DEFAULT_SOFT_DELETE_DAYS)
+    soft_days = _entry_options(entry).get(CONF_SOFT_DELETE_DAYS, DEFAULT_SOFT_DELETE_DAYS)
     expired = await data["store"].async_get_expired_soft_deleted(soft_days)
     if not expired:
         return

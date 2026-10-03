@@ -1,6 +1,6 @@
 """Constants for HA Optimizer."""
 DOMAIN = "ha_optimizer"
-VERSION = "1.7.26"
+VERSION = "1.7.27"
 
 # Config keys
 CONF_SCAN_INTERVAL_DAYS = "scan_interval_days"

@@ -49,7 +49,13 @@ class PurgeEngineConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="already_configured")
 
         if user_input is not None:
-            # Store settings in options, keep data empty
+            # Settings go in `data`, not `options`. This comment claimed the
+            # opposite for a long time, and that is how four readers of
+            # `entry.options` in __init__.py kept falling back to their defaults
+            # - including the soft-delete window the expiry job uses to decide
+            # when to delete a user's trash for good, irreversibly. Reads go
+            # through _entry_options(), which prefers options and falls back to
+            # here; this line is the fallback, not the primary home.
             return self.async_create_entry(title="HA Optimizer", data=user_input)
 
         return self.async_show_form(step_id="user", data_schema=STEP_SCHEMA)

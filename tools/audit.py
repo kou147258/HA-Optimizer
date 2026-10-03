@@ -226,6 +226,8 @@ TOOL_CHECKS: list[tuple[str, str, list[str]]] = [
     ("live_log", "live-log regressions", ["test_live_log_findings.py"]),
     ("source.dead_guard", "flattened lines and dead guards", ["test_dead_guard.py"]),
     ("source.dead_guard.cp", "dead-guard checks can still fail", ["counterproof_dead_guard.py"]),
+    ("source.dead_guard.tpl", "the dead-guard stripper sees code, not text",
+     ["counterproof_dead_guard_templates.py"]),
     ("identity.rename", "registry identity behaviour", ["test_rename_identity.py"]),
     ("identity.rename.cp", "identity checks can still fail", ["counterproof_rename_identity.py"]),
     ("source.trace_join", "traces are read the way HA stores them", ["test_trace_join.py"]),

@@ -31,12 +31,14 @@ CASES = [
      'sys.exit(0)\ncheck("coverage lists the bucket keys, so an empty page can be argued with",',
      "test_trace_join.py has no unreachable tail"),
 
-    ("a tool exits twice",
+    # A second bare exit with nothing after it is harmless - there is no
+    # unreachable code - so the rule that matters is the tail. This case has the
+    # real defect's shape: an early exit with the assertions still to come.
+    ("a tool ends the run before its own assertions (a second file)",
      "tools/test_py_names.py",
-     "sys.exit(0 if ok == len(results) else 1)\n",
-     "sys.exit(0 if ok == len(results) else 1)\n"
-     "sys.exit(0 if ok == len(results) else 1)\n",
-     "test_py_names.py exits exactly once"),
+     'check("the component has python sources to check", bool(files)',
+     'sys.exit(0)\ncheck("the component has python sources to check", bool(files)',
+     "test_py_names.py has no unreachable tail"),
 
     ("the release reads the title again without stripping the BOM",
      "tools/audit.py",
