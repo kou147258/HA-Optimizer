@@ -1260,6 +1260,11 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
             supports_response=SupportsResponse.OPTIONAL,
         )
         hass.services.async_register(
+            DOMAIN, SERVICE_ANALYZE_AUTOMATION_RUNS, handle_analyze_automation_runs,
+            schema=vol.Schema({}),
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+        hass.services.async_register(
             DOMAIN, SERVICE_ANALYZE_ADDONS, handle_analyze_addons,
             schema=vol.Schema({}),
             supports_response=SupportsResponse.OPTIONAL,
