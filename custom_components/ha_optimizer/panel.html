@@ -653,6 +653,8 @@
 .auto-fail  { background:rgba(244,67,54,0.12);  color:var(--danger); }
 .auto-cond  { background:rgba(255,152,0,0.12);  color:var(--warning); }
 .auto-muted { background:var(--surface2);        color:var(--text-muted); }
+.auto-none  { background:rgba(120,120,120,0.10); color:var(--text-muted);
+              border:1px dashed var(--border); }
 .auto-pill  { padding:2px 8px; border-radius:999px; font-size:0.72rem; font-weight:600; }
 
 .group-strip { display:flex; gap:10px; overflow-x:auto; padding:2px 2px 10px; }
@@ -2658,6 +2660,9 @@ const AUTO_OUTCOME = {
   condition_stopped: { cls: 'auto-cond', key: 'autoOutcomeCondition' },
   running:        { cls: 'auto-muted',key: 'autoOutcomeRunning' },
   unknown:        { cls: 'auto-muted',key: 'autoOutcomeUnknown' },
+  // Not a verdict. Its own badge, deliberately between "fine" and "broken",
+  // because it is neither: Home Assistant has no record of the outcome.
+  untraced:       { cls: 'auto-none', key: 'autoOutcomeUntraced' },
 };
 
 function renderAutomationRuns(host, d) {
@@ -2665,7 +2670,8 @@ function renderAutomationRuns(host, d) {
   //    read nothing is the exact failure this project keeps fixing.
   const cov = d.coverage || {};
   let html = '';
-  if (!cov.traces_available) {
+  const rows_placeholder = (d.automations || []).length > 0;
+  if (!cov.traces_available && !rows_placeholder) {
     // One banner, carrying the reason. It used to be printed twice - once here
     // and again as the empty state below - on a screen with nothing else on it.
     html += `<div style="display:flex; gap:10px; align-items:flex-start; padding:12px 14px;
@@ -2691,6 +2697,7 @@ function renderAutomationRuns(host, d) {
         <span>${escapeHtml(t('autoStatFailed'))}: <b style="color:var(--danger)">${s.failures ?? 0}</b></span>
         <span>${escapeHtml(t('autoStatCond'))}: <b style="color:var(--text-muted)">${s.condition_stops ?? 0}</b></span>
         <span>${escapeHtml(t('autoStatRate'))}: <b>${rate}</b></span>
+        ${s.untraced ? `<span>${escapeHtml(t('autoStatUntraced', { n: s.untraced }))}</span>` : ''}
       </div>
       <p style="color:var(--text-muted); font-size:0.78rem; margin-top:10px">
         ${escapeHtml(t('autoRateNote'))}</p>
@@ -2699,13 +2706,11 @@ function renderAutomationRuns(host, d) {
 
   const rows = d.automations || [];
   if (!rows.length) {
-    // The reason, when traces were readable but held nothing, is a different
-    // one - and repeating the coverage banner here is what made this read as
-    // two separate problems.
-    if (cov.traces_available) {
-      html += `<div class="empty-state"><div class="icon">🤖</div><h3>${escapeHtml(t('autoEmpty'))}</h3>
-        <p>${escapeHtml(t('autoEmptyDesc'))}</p></div>`;
-    }
+    // Only when there is genuinely nothing to list. An empty list used to
+    // stand in for "the outcomes are unknown", which on a busy instance means
+    // most of the time - and read as "nothing to see here".
+    html += `<div class="empty-state"><div class="icon">🤖</div><h3>${escapeHtml(t('autoEmpty'))}</h3>
+      <p>${escapeHtml(t('autoEmptyDesc'))}</p></div>`;
     host.innerHTML = html;
     return;
   }
@@ -2734,7 +2739,14 @@ function renderAutomationRuns(host, d) {
     const consec = a.consecutive_failures > 1
       ? `<span class="auto-pill" style="background:rgba(244,67,54,0.12); color:var(--danger)">
            ${escapeHtml(t('autoConsecutive', { n: a.consecutive_failures }))}</span>` : '';
-    const lastRun = a.last_run ? new Date(a.last_run).toLocaleString(_panelLocale()) : '—';
+    const lastRun = a.last_run ? new Date(a.last_run).toLocaleString(_panelLocale())
+      : (a.last_triggered ? new Date(a.last_triggered).toLocaleString(_panelLocale()) : '—');
+    // last_triggered is the fact that exists for EVERY automation; the run
+    // outcome only exists for traced ones. Saying which is which is the point.
+    if (a.last_outcome === 'untraced') {
+      detail += `<div style="margin-top:4px; font-size:0.78rem; color:var(--text-muted)">
+        ${escapeHtml(t('autoNeverTraced'))}</div>`;
+    }
     html += `<div class="auto-row">
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap">
         <span class="${o.cls}">${escapeHtml(t(o.key))}</span>
@@ -2743,6 +2755,7 @@ function renderAutomationRuns(host, d) {
         ${a.disabled ? `<span class="auto-pill" style="background:var(--surface2); color:var(--text-muted)">${escapeHtml(t('autoDisabled'))}</span>` : ''}
       </div>
       <div style="font-size:0.78rem; color:var(--text-muted); margin-top:3px">
+        ${a.enabled === false ? escapeHtml(t('autoOff')) + ' · ' : ''}
         ${escapeHtml(t('autoStatsLine', {
           runs: a.runs_known, ok: a.successes, fail: a.failures, cond: a.condition_stops }))}
         &nbsp;·&nbsp;${escapeHtml(t('autoLastRun'))}: ${escapeHtml(lastRun)}
@@ -2776,6 +2789,11 @@ function switchTab(name) {
   document.querySelectorAll('.tab[data-tab]').forEach(el => {
     el.classList.toggle('active', el.getAttribute('data-tab') === name);
   });
+  // The selection bar belongs to the scan tab: the selection it acts on lives
+  // there. It is a global element, so without this it stayed floating over
+  // every other tab after ticking a row on Overview Scan.
+  const _selBar = document.getElementById('selectedBar');
+  if (_selBar) _selBar.style.display = (name === 'scan' && selectedIds.size > 0) ? 'flex' : 'none';
   if (name === 'autos') loadAutomationRuns();
   if (name === 'soft') loadSoftDeleted();
   if (name === 'addon') loadAddonTab();
@@ -4457,6 +4475,10 @@ const I18N = {
     autoOutcomeOk: 'last run OK', autoOutcomeFailed: 'last run FAILED',
     autoOutcomeCondition: 'stopped by condition', autoOutcomeRunning: 'running',
     autoOutcomeUnknown: 'no run recorded',
+    autoOutcomeUntraced: 'not measured',
+    autoNeverTraced: 'Home Assistant keeps no trace for this one, so how its last run went is unknown - not "fine".',
+    autoStatUntraced: (p) => `${p.n} not measured`,
+    autoOff: 'currently off',
     autoNoTraces: 'Home Assistant trace data is not available on this instance, so run outcomes are unknown - not "healthy". Traces are recorded once automations have run.',
     autoEmpty: 'No automation runs recorded',
     autoEmptyDesc: 'Nothing has run since Home Assistant started, or the automations have no id so their traces are not stored.',
@@ -4952,6 +4974,10 @@ const I18N = {
     autoOutcomeOk: '上次成功', autoOutcomeFailed: '上次失败',
     autoOutcomeCondition: '条件不满足', autoOutcomeRunning: '正在运行',
     autoOutcomeUnknown: '没有运行记录',
+    autoOutcomeUntraced: '未测量',
+    autoNeverTraced: 'Home Assistant 没有为这个自动化保留 trace，所以上次运行是成功还是失败**未知** —— 不等于「正常」。',
+    autoStatUntraced: (p) => `${p.n} 个未测量`,
+    autoOff: '当前已关闭',
     autoNoTraces: '这个实例上没有 Home Assistant 的 trace 数据，所以运行结局是「未知」，不是「健康」。trace 要等自动化实际运行过才会有。',
     autoEmpty: '没有自动化的运行记录',
     autoEmptyDesc: 'Home Assistant 启动后还没有自动化运行过，或者这些自动化没有 id，trace 不会被保存。',
@@ -6105,7 +6131,7 @@ document.addEventListener('DOMContentLoaded', () => {
      The strip prints both, and a mismatch becomes visible instead of having to
      be inferred. Bumped with the version; check_build_stamp keeps it in step
      with const.py. -->
-<script>const PANEL_FILE_BUILD = '1.7.19';
+<script>const PANEL_FILE_BUILD = '1.7.20';
        const EXPECTED_TAB_COUNT = 10;</script>
 <script>
 /* What this browser actually loaded, as facts. The file on disk was correct

@@ -250,13 +250,41 @@ class AutomationRunAnalyzer:
 
         names = self._automation_names()
         rows: list[dict[str, Any]] = []
-        for automation_id, bucket in buckets.items():
-            runs = [classify(d) for d in _trace_dicts(bucket)]
-            rows.append(self._row(automation_id, names.get(automation_id, {}), runs))
+        for automation_id, meta in names.items():
+            bucket = buckets.get(automation_id)
+            runs = [classify(d) for d in _trace_dicts(bucket)] if bucket else []
+            row = self._row(automation_id, meta, runs)
+            # last_triggered is the one thing available for every automation.
+            # It says the automation ran, and when - not whether it worked, and
+            # saying otherwise would be the exact kind of confident wrong answer
+            # this page exists to avoid.
+            row["last_triggered"] = meta.get("last_triggered")
+            row["enabled"] = meta.get("enabled")
+            row["traced"] = bool(runs)
+            if not runs:
+                row["last_outcome"] = "untraced"
+                row["unmeasured_reason"] = (
+                    "Home Assistant only records a trace for automations somebody "
+                    "has traced - open this automation's Traces page once, or set "
+                    "`trace: stored_traces:` in its YAML, and it will be measured here."
+                )
+            rows.append(row)
 
-        rows.sort(key=lambda r: (r["failures"] == 0, -r["failures"], r["name"].lower()))
+        # Failures first, then the ones we cannot judge, then the healthy.
+        # The unmeasured ones sit in the middle: not a warning, not a
+        # reassurance, and visibly not "fine".
+        def _rank(r: dict[str, Any]) -> tuple:
+            return (r["failures"] == 0, r["traced"] is False, r["name"].lower())
+
+        rows.sort(key=_rank)
         result["automations"] = rows
         result["summary"] = self._summary(rows)
+        result["summary"]["untraced"] = sum(1 for r in rows if not r["traced"])
+        result["summary"]["total_automations"] = len(rows)
+        result["summary"]["note"] = (
+            "Success and failure are only known for automations that have been "
+            "traced. The rest are listed as unmeasured - not as healthy."
+        )
         return result
 
     def _automation_names(self) -> dict[str, dict[str, Any]]:
@@ -272,12 +300,20 @@ class AutomationRunAnalyzer:
             _LOGGER.warning("No entity registry available: %s", exc)
             return out
         for entry in ent_reg.entities.values():
-            if entry.domain != "automation" or entry.config_entry_id is None:
+            if entry.domain != "automation":
                 continue
-            out[entry.config_entry_id] = {
+            # The state object carries last_triggered, which is the only run
+            # fact available for an automation nobody has traced.
+            state = self.hass.states.get(entry.entity_id)
+            attrs = state.attributes if state is not None else {}
+            key = entry.config_entry_id or entry.entity_id
+            out[key] = {
                 "entity_id": entry.entity_id,
-                "name": entry.name or entry.original_name or entry.entity_id,
+                "name": (attrs.get("friendly_name")
+                         or entry.name or entry.original_name or entry.entity_id),
                 "disabled": bool(entry.disabled),
+                "enabled": (state.state == "on") if state is not None else None,
+                "last_triggered": attrs.get("last_triggered"),
             }
         return out
 
