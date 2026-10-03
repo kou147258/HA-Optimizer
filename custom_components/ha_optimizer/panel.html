@@ -2657,12 +2657,19 @@ function refreshAutomationRuns() {
 const AUTO_OUTCOME = {
   ok:             { cls: 'auto-ok',   key: 'autoOutcomeOk' },
   failed:         { cls: 'auto-fail', key: 'autoOutcomeFailed' },
-  condition_stopped: { cls: 'auto-cond', key: 'autoOutcomeCondition' },
+  // Home Assistant records a false `condition` and a `break:` with the same
+  // reason, "aborted", and keeps nothing that separates them. So this badge
+  // says "ended early" and not "stopped by a condition" - which is what the
+  // old one claimed, and which the data behind it cannot support.
+  aborted:        { cls: 'auto-cond', key: 'autoOutcomeAborted' },
   running:        { cls: 'auto-muted',key: 'autoOutcomeRunning' },
   unknown:        { cls: 'auto-muted',key: 'autoOutcomeUnknown' },
   // Not a verdict. Its own badge, deliberately between "fine" and "broken",
   // because it is neither: Home Assistant has no record of the outcome.
   untraced:       { cls: 'auto-none', key: 'autoOutcomeUntraced' },
+  // A trigger that evaluated a change and declined to fire is not a run, and
+  // is never the last run.
+  not_triggered:  { cls: 'auto-muted',key: 'autoOutcomeNotTriggered' },
 };
 
 function renderAutomationRuns(host, d) {
@@ -2689,18 +2696,36 @@ function renderAutomationRuns(host, d) {
   } else {
     const s = d.summary || {};
     const rate = s.success_rate === null || s.success_rate === undefined ? '—' : s.success_rate + '%';
+    // What the read actually saw, in numbers. Four releases of this page
+    // reported a confident verdict from data it had failed to attach to
+    // anything, and every one of those layers said so in prose nobody could
+    // check. These are the counts that make it checkable: buckets in memory,
+    // runs read, runs attached, runs left over.
+    const obs = cov.observed || {};
+    const seen = obs.buckets !== undefined || obs.runs !== undefined
+      ? `<div style="font-size:0.78rem; color:var(--text-muted); margin-top:8px;
+           border-top:1px solid var(--border); padding-top:8px">
+           ${escapeHtml(t('autoObserved', {
+             buckets: obs.buckets ?? '—', runs: obs.runs ?? '—',
+             unmatched: cov.unmatched_runs ?? 0 }))}
+           ${(obs.storage_runs !== undefined)
+             ? `<div style="margin-top:3px">${escapeHtml(t('autoObservedStored', {
+                 keys: obs.storage_keys ?? 0, runs: obs.storage_runs }))}</div>` : ''}
+         </div>` : '';
     html += `<div class="stat-card" style="text-align:left; padding:16px; margin-bottom:20px">
       <h3 style="margin-bottom:12px; font-size:1rem">${escapeHtml(t('autoSummaryTitle'))}</h3>
       <div style="display:flex; flex-wrap:wrap; gap:18px; font-size:0.85rem">
         <span>${escapeHtml(t('autoStatRuns'))}: <b>${s.runs_known ?? 0}</b></span>
         <span>${escapeHtml(t('autoStatOk'))}: <b style="color:var(--success)">${s.successes ?? 0}</b></span>
         <span>${escapeHtml(t('autoStatFailed'))}: <b style="color:var(--danger)">${s.failures ?? 0}</b></span>
-        <span>${escapeHtml(t('autoStatCond'))}: <b style="color:var(--text-muted)">${s.condition_stops ?? 0}</b></span>
+        <span>${escapeHtml(t('autoStatAborted'))}: <b style="color:var(--text-muted)">${s.aborted ?? 0}</b></span>
+        ${(s.not_triggered) ? `<span>${escapeHtml(t('autoStatNotTriggered', { n: s.not_triggered }))}</span>` : ''}
         <span>${escapeHtml(t('autoStatRate'))}: <b>${rate}</b></span>
         ${s.untraced ? `<span>${escapeHtml(t('autoStatUntraced', { n: s.untraced }))}</span>` : ''}
       </div>
       <p style="color:var(--text-muted); font-size:0.78rem; margin-top:10px">
         ${escapeHtml(t('autoRateNote'))}</p>
+      ${seen}
     </div>`;
   }
 
@@ -2745,7 +2770,7 @@ function renderAutomationRuns(host, d) {
     // outcome only exists for traced ones. Saying which is which is the point.
     if (a.last_outcome === 'untraced') {
       detail += `<div style="margin-top:4px; font-size:0.78rem; color:var(--text-muted)">
-        ${escapeHtml(t('autoNeverTraced'))}</div>`;
+        ${escapeHtml(t('autoNoRunsStored'))}</div>`;
     }
     html += `<div class="auto-row">
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap">
@@ -2757,7 +2782,8 @@ function renderAutomationRuns(host, d) {
       <div style="font-size:0.78rem; color:var(--text-muted); margin-top:3px">
         ${a.enabled === false ? escapeHtml(t('autoOff')) + ' · ' : ''}
         ${escapeHtml(t('autoStatsLine', {
-          runs: a.runs_known, ok: a.successes, fail: a.failures, cond: a.condition_stops }))}
+          runs: a.runs_known, ok: a.successes, fail: a.failures,
+          aborted: a.aborted ?? 0, untrig: a.not_triggered ?? 0 }))}
         &nbsp;·&nbsp;${escapeHtml(t('autoLastRun'))}: ${escapeHtml(lastRun)}
         ${a.entity_id ? ` &nbsp;·&nbsp; <code>${escapeHtml(a.entity_id)}</code>` : ''}
       </div>
@@ -4470,21 +4496,25 @@ const I18N = {
     tabAutos: '🤖 Automations',
     autoSummaryTitle: 'Automation runs',
     autoStatRuns: 'runs known', autoStatOk: 'succeeded', autoStatFailed: 'failed',
-    autoStatCond: 'stopped by a condition', autoStatRate: 'success rate',
-    autoRateNote: 'The success rate counts only runs whose outcome is known. A run stopped by a false condition is a normal outcome, not a failure, and is listed separately.',
+    autoStatAborted: 'ended early', autoStatRate: 'success rate',
+    autoStatNotTriggered: (p) => `${p.n} trigger checks declined`,
+    autoRateNote: 'The success rate counts only runs whose outcome is known. A run that ended early is not a failure - Home Assistant records a false condition and a break: with the same reason and keeps nothing that separates them, so it is listed apart rather than guessed at. A trigger that evaluated a change and declined to fire is not a run at all.',
+    autoObserved: (p) => `Seen while reading: ${p.buckets} trace bucket(s), ${p.runs} stored run(s), ${p.unmatched} run(s) that matched no automation.`,
+    autoObservedStored: (p) => `Saved to disk: ${p.keys} key(s), ${p.runs} run(s) - trace buckets are only written when Home Assistant stops, so an empty file while buckets exist in memory is normal.`,
     autoOutcomeOk: 'last run OK', autoOutcomeFailed: 'last run FAILED',
-    autoOutcomeCondition: 'stopped by condition', autoOutcomeRunning: 'running',
+    autoOutcomeAborted: 'ended early', autoOutcomeRunning: 'running',
     autoOutcomeUnknown: 'no run recorded',
+    autoOutcomeNotTriggered: 'trigger declined',
     autoCoverUnavailable: 'This Home Assistant version has no trace component, so run outcomes cannot be read at all.',
-    autoCoverEmpty: 'Home Assistant keeps a trace only for automations somebody has traced - open an automation\'s Traces page once, or add `trace: stored_traces:` to its YAML, and it will be measured here.',
+    autoCoverEmpty: 'Home Assistant keeps the last 5 runs of every automation, so an empty store means none of them has run since Home Assistant last started - or that this could not read the store at all. The counts above say which.',
     autoOutcomeUntraced: 'not measured',
-    autoNeverTraced: 'Home Assistant keeps no trace for this one, so how its last run went is unknown - not "fine".',
+    autoNoRunsStored: 'No stored run for this one. Home Assistant keeps the last 5 runs of every automation, so it means the automation has not run since Home Assistant last started - not that it is broken.',
     autoStatUntraced: (p) => `${p.n} not measured`,
     autoOff: 'currently off',
     autoNoTraces: 'Home Assistant trace data is not available on this instance, so run outcomes are unknown - not "healthy". Traces are recorded once automations have run.',
     autoEmpty: 'No automation runs recorded',
-    autoEmptyDesc: 'Nothing has run since Home Assistant started, or the automations have no id so their traces are not stored.',
-    autoStatsLine: (p) => `${p.runs} runs known · ${p.ok} ok · ${p.fail} failed · ${p.cond} stopped by condition`,
+    autoEmptyDesc: 'Nothing has run since Home Assistant started.',
+    autoStatsLine: (p) => `${p.runs} runs known · ${p.ok} ok · ${p.fail} failed · ${p.aborted} ended early${p.untrig ? ` · ${p.untrig} trigger declined` : ''}`,
     autoLastRun: 'last run', autoDisabled: 'disabled',
     autoSuggestion: 'What usually causes this', autoMatched: 'matched',
     autoUnclassified: 'This error was not recognised, so no suggestion is offered rather than a generic one.',
@@ -4971,21 +5001,25 @@ const I18N = {
     tabAutos: '🤖 自动化',
     autoSummaryTitle: '自动化运行情况',
     autoStatRuns: '已知运行', autoStatOk: '成功', autoStatFailed: '失败',
-    autoStatCond: '因条件不满足而停止', autoStatRate: '成功率',
-    autoRateNote: '成功率只统计结局已知的运行。因条件为假而停止是正常结果，不是失败，所以单独列出。',
+    autoStatAborted: '提前结束', autoStatRate: '成功率',
+    autoStatNotTriggered: (p) => `${p.n} 次触发未命中`,
+    autoRateNote: '成功率只统计结局已知的运行。提前结束不算失败 —— HA 把「条件为假」和「break:」记成同一个原因（aborted），也不保留任何能区分它们的信息，所以这里单列而不替它下结论。触发器评估了但没触发的记录不算一次运行。',
+    autoObserved: (p) => `本次读取实际看到：${p.buckets} 个 trace 桶、${p.runs} 条已存运行、${p.unmatched} 条没能对上任何自动化。`,
+    autoObservedStored: (p) => `已落盘：${p.keys} 个键、${p.runs} 条运行 —— trace 桶只在 HA 停止时写盘，所以「内存里有、文件里空」是正常状态。`,
     autoOutcomeOk: '上次成功', autoOutcomeFailed: '上次失败',
-    autoOutcomeCondition: '条件不满足', autoOutcomeRunning: '正在运行',
+    autoOutcomeAborted: '提前结束', autoOutcomeRunning: '正在运行',
     autoOutcomeUnknown: '没有运行记录',
+    autoOutcomeNotTriggered: '触发未命中',
     autoCoverUnavailable: '这个 Home Assistant 版本没有 trace 组件，读不到任何运行结局。',
-    autoCoverEmpty: 'Home Assistant 只为「被追踪过」的自动化保留 trace —— 在某个自动化的 Traces 页打开一次，或在它的 YAML 里加 trace: stored_traces:，这里就能测出结果。',
+    autoCoverEmpty: 'HA 为每个自动化保留最近 5 次运行，所以存储为空意味着它们自 HA 上次启动以来没运行过 —— 或者这次根本没读到存储。上面那组数字会告诉你是哪一种。',
     autoOutcomeUntraced: '未测量',
-    autoNeverTraced: 'Home Assistant 没有为这个自动化保留 trace，所以上次运行是成功还是失败**未知** —— 不等于「正常」。',
+    autoNoRunsStored: '这个自动化没有已存的运行。HA 为每个自动化保留最近 5 次运行，所以这说明它自上次启动以来没跑过 —— 不是它坏了。',
     autoStatUntraced: (p) => `${p.n} 个未测量`,
     autoOff: '当前已关闭',
     autoNoTraces: '这个实例上没有 Home Assistant 的 trace 数据，所以运行结局是「未知」，不是「健康」。trace 要等自动化实际运行过才会有。',
     autoEmpty: '没有自动化的运行记录',
-    autoEmptyDesc: 'Home Assistant 启动后还没有自动化运行过，或者这些自动化没有 id，trace 不会被保存。',
-    autoStatsLine: (p) => `已知 ${p.runs} 次运行 · 成功 ${p.ok} · 失败 ${p.fail} · 条件不满足 ${p.cond}`,
+    autoEmptyDesc: 'Home Assistant 启动后还没有自动化运行过。',
+    autoStatsLine: (p) => `已知 ${p.runs} 次运行 · 成功 ${p.ok} · 失败 ${p.fail} · 提前结束 ${p.aborted}${p.untrig ? ` · 触发未命中 ${p.untrig}` : ''}`,
     autoLastRun: '上次运行', autoDisabled: '已禁用',
     autoSuggestion: '这类错误的常见原因', autoMatched: '命中',
     autoUnclassified: '这个错误没有被识别，所以不给建议，而不是给一个泛泛的。',
@@ -6135,7 +6169,7 @@ document.addEventListener('DOMContentLoaded', () => {
      The strip prints both, and a mismatch becomes visible instead of having to
      be inferred. Bumped with the version; check_build_stamp keeps it in step
      with const.py. -->
-<script>const PANEL_FILE_BUILD = '1.7.23';
+<script>const PANEL_FILE_BUILD = '1.7.24';
        const EXPECTED_TAB_COUNT = 10;</script>
 <script>
 /* What this browser actually loaded, as facts. The file on disk was correct

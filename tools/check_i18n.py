@@ -214,6 +214,14 @@ def _normalise(raw: str) -> str:
 # ── checks ───────────────────────────────────────────────────────────────────
 
 PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+# A function-valued entry interpolates like `${p.cond}`, and the pattern above
+# cannot see it: after `{` comes a dotted expression, and a plain identifier
+# cannot swallow the dot. So those placeholders were invisible to the parity
+# check, which is how a Chinese line kept reading `${p.cond}` after the field
+# it names was renamed - the page rendered the word "undefined" and every other
+# check stayed green.
+TEMPLATE_PLACEHOLDER = re.compile(
+    r"\$\{\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\}")
 TAG = re.compile(r"</?[A-Za-z][^>]*>")
 CALL = re.compile(r"\bt\(\s*'([A-Za-z_][A-Za-z0-9_]*)'")
 
@@ -267,7 +275,7 @@ def main() -> int:
     langs = [l for l in i18n if l != BASE]
 
     def ph(v: str) -> set[str]:
-        return set(PLACEHOLDER.findall(v))
+        return set(PLACEHOLDER.findall(v)) | set(TEMPLATE_PLACEHOLDER.findall(v))
 
     def tags(v: str) -> list[str]:
         return sorted(TAG.findall(v))
