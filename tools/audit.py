@@ -546,14 +546,20 @@ def do_release(version: str, dry_run: bool, notes: Path, title: Path,
     tree = git("rev-parse", "HEAD^{tree}").strip()
     # The tag must point at what is being released. Creating it at the branch
     # head while the package is built from the local HEAD tags the PREVIOUS
-    # commit and ships an asset that does not match its own tag - which is
-    # exactly what happened once, and the loop-back caught it only by comparing
-    # the download against the tag.
-    local_head = git("rev-parse", "HEAD").strip()
-    if local_head != head:
-        print(f"ABORT: local HEAD {local_head[:7]} is not the branch head "
-              f"{head[:7]}. Push first - a tag created now would point at the "
-              f"previous commit while the package is built from this one.")
+    # commit and ships an asset that does not match its own tag - which is what
+    # happened once, and the loop-back caught it only by comparing the download
+    # against the tag.
+    #
+    # Trees, not commit SHAs: a commit recreated through the API has a different
+    # SHA from its local twin (different committer and timestamp) while its tree
+    # is byte-identical, so comparing SHAs would refuse every push-based release.
+    local_tree = tree
+    remote_tree = gh_json(f"repos/{REPO}/commits/{head}")["commit"]["tree"]["sha"]
+    if local_tree != remote_tree:
+        print(f"ABORT: the local tree {local_tree[:7]} is not the branch head's "
+              f"tree {remote_tree[:7]}. Push first - a tag created now would "
+              f"point at the previous commit while the package is built from "
+              f"this one.")
         return 2
     if tree[:7] not in asset.name:
         print(f"ABORT: asset built from tree {tree[:7]}, branch head is {head[:7]}")
