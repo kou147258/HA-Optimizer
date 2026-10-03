@@ -49,7 +49,7 @@ MUTATIONS = [
         """    try {
       const fresh = extractData(await callService('ha_optimizer', 'get_results', {}));
       if (fresh && Array.isArray(fresh.results)) {
-        displayResults(fresh.results);
+        displayResults(fresh.results, fresh.groups);
         updateStats(fresh.statistics || {});
         localStorage.setItem('ha_optimizer_results', JSON.stringify(fresh));
       }

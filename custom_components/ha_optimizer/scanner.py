@@ -75,6 +75,8 @@ class ScanResult:
         is_yaml_entity: bool = False,
         disabled: bool = False,
         unique_id: str | None = None,
+        area_id: str | None = None,
+        area_name: str | None = None,
     ):
         self.entity_id = entity_id
         self.name = name
@@ -91,6 +93,11 @@ class ScanResult:
         self.is_yaml_entity = is_yaml_entity
         self.disabled = disabled
         self.unique_id = unique_id  # HA storage ID — used for editor deep links
+        # The area is what turns a count into a decision: one integration in
+        # one room contributing hundreds of dead entities is a single thing to
+        # act on, and it is invisible in a flat list of 2000.
+        self.area_id = area_id
+        self.area_name = area_name
 
     def to_dict(self) -> dict:
         return {
@@ -109,6 +116,8 @@ class ScanResult:
             "is_yaml_entity": self.is_yaml_entity,
             "disabled": self.disabled,
             "unique_id": self.unique_id,
+            "area_id": self.area_id,
+            "area_name": self.area_name,
         }
 
 
@@ -164,6 +173,26 @@ class DataScanner:
         script_results = await self._scan_scripts(references)
         results.extend(script_results)
 
+        # Resolve area names once, then attach them. A registry entry carries
+        # the id; the name lives in the area registry, and an entity can also
+        # have no area at all - which is a group of its own rather than a gap,
+        # because on a large instance "no area" is often where the leftovers
+        # pile up.
+        area_names: dict[str, str] = {}
+        try:
+            from homeassistant.helpers import area_registry as ar
+
+            area_reg = ar.async_get(self.hass)
+            for area in area_reg.areas.values():
+                area_names[area.id] = area.name
+        except Exception as exc:  # noqa: BLE001
+            # The scan is still useful without names; ids are what the filter
+            # keys on, so this degrades to labels rather than breaking the scan.
+            _LOGGER.warning("Could not read the area registry: %s", exc)
+        for r in results:
+            if r.area_id:
+                r.area_name = area_names.get(r.area_id, r.area_id)
+
         # Build statistics
         total = len(ent_reg.entities)
         found = len(results)
@@ -179,6 +208,7 @@ class DataScanner:
 
         return {
             "results": [r.to_dict() for r in results],
+            "groups": self._build_groups(results),
             "statistics": {
                 "total_entities": total,
                 "candidates_found": found,
@@ -195,6 +225,45 @@ class DataScanner:
         "input_number", "input_select", "input_text", "input_datetime",
         "counter", "timer", "schedule",
     }
+
+    # How many integrations to name inside one area before the list stops being
+    # a summary and becomes the flat list again.
+    GROUP_TOP_PLATFORMS = 6
+
+    def _build_groups(self, results: list[ScanResult]) -> list[dict[str, Any]]:
+        """Summarise the candidates by area, naming the platforms inside each.
+
+        Sorted by size, so the group that is worth acting on is the first thing
+        on screen. The integration breakdown is capped, because the point is to
+        answer "which integration is responsible here", not to reprint the list.
+        """
+        buckets: dict[str | None, dict[str, Any]] = {}
+        for r in results:
+            key = r.area_id
+            b = buckets.get(key)
+            if b is None:
+                b = buckets[key] = {
+                    "area_id": key,
+                    "area_name": r.area_name or "—",
+                    "count": 0,
+                    "by_risk": {"high": 0, "medium": 0, "low": 0},
+                    "platforms": {},
+                }
+            b["count"] += 1
+            if r.risk_level in b["by_risk"]:
+                b["by_risk"][r.risk_level] += 1
+            platform = r.platform or r.domain or "—"
+            b["platforms"][platform] = b["platforms"].get(platform, 0) + 1
+
+        out: list[dict[str, Any]] = []
+        for b in buckets.values():
+            top = sorted(b["platforms"].items(), key=lambda kv: (-kv[1], kv[0]))
+            b["platforms"] = dict(top[: self.GROUP_TOP_PLATFORMS])
+            b["platform_count"] = len(top)
+            b.pop("platforms_full", None)
+            out.append(b)
+        out.sort(key=lambda b: (-b["count"], b["area_name"]))
+        return out
 
     def _analyze_entity(
         self,
@@ -356,6 +425,7 @@ class DataScanner:
             is_yaml_entity=is_yaml,
             disabled=entry.disabled,
             unique_id=entry.unique_id,
+            area_id=entry.area_id,
         )
 
     async def _scan_automations(self, references: dict) -> list[ScanResult]:

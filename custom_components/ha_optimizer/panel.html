@@ -642,7 +642,30 @@
      is not meant to be looked at. Unconditional: inside a media query it
      would simply not exist on a wide panel, which is the mistake this whole
      change exists to stop repeating. */
-  .build-stamp {
+  .group-strip { display:flex; gap:10px; overflow-x:auto; padding:2px 2px 10px; }
+.group-card {
+  flex:0 0 auto; min-width:180px; max-width:260px; padding:10px 12px; cursor:pointer;
+  border:1px solid var(--border); border-radius:10px; background:var(--surface);
+  transition:border-color .15s, background .15s;
+}
+.group-card:hover { border-color:var(--primary); }
+.group-card.on { border-color:var(--primary); background:var(--surface2); }
+.group-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+.group-name { font-weight:700; font-size:0.9rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.group-count { font-size:1.15rem; font-weight:800; color:var(--primary); }
+.group-risk { display:flex; gap:6px; align-items:center; margin-top:4px; font-size:0.75rem; }
+.risk-dot { padding:1px 6px; border-radius:999px; font-weight:700; }
+.risk-dot.high { background:rgba(244,67,54,0.12); color:var(--danger); }
+.risk-dot.medium { background:rgba(255,152,0,0.12); color:var(--warning); }
+.risk-dot.low { background:rgba(120,120,120,0.12); color:var(--text-muted); }
+.risk-more { color:var(--text-muted); }
+.group-plats { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+.group-plat { font-size:0.7rem; padding:1px 5px; border-radius:4px; background:var(--surface2); color:var(--text-muted); }
+.group-plat b { color:var(--text); }
+.group-actions { display:flex; gap:6px; margin-top:8px; }
+.btn-xs { padding:3px 8px; font-size:0.72rem; }
+
+.build-stamp {
     margin-top: 28px;
     padding-top: 10px;
     border-top: 1px solid var(--border);
@@ -1475,6 +1498,8 @@
      makes that a real question, so the build says so on the screen. The
      value comes from the ?v= on this iframe URL, which the integration sets
      from the same constant the manifest is built from. -->
+<div class="group-strip" id="groupStrip" style="display:none"></div>
+
 <div class="build-stamp">HA Optimizer <span id="buildVersion">…</span></div>
 
 <script>
@@ -1832,9 +1857,83 @@ function generateMockData() {
 // ================================================================
 // DISPLAY
 // ================================================================
-function displayResults(results) {
+
+// ── Grouping by area ────────────────────────────────────────────────────────
+// A flat list of two thousand candidates is not a decision. "This integration,
+// in this room, 400 of them" is. So the strip is the primary control and the
+// table is the detail behind whatever group is selected.
+let resultGroups = [];
+let groupFilter = null;
+
+function renderGroupStrip() {
+  const host = document.getElementById('groupStrip');
+  if (!host) return;
+  if (!resultGroups || resultGroups.length < 2) {
+    host.innerHTML = '';
+    host.style.display = 'none';
+    return;
+  }
+  host.style.display = '';
+  host.innerHTML = resultGroups.map(g => {
+    const id = g.area_id === null || g.area_id === undefined ? '' : g.area_id;
+    const on = groupFilter !== null && String(groupFilter) === String(id);
+    const plats = Object.entries(g.platforms || {})
+      .map(([p, n]) => `<span class="group-plat">${p} <b>${n}</b></span>`).join('');
+    return `<div class="group-card${on ? ' on' : ''}" data-area="${id}">
+      <div class="group-head">
+        <span class="group-name">${escapeHtml(g.area_name || t('groupNoArea'))}</span>
+        <span class="group-count">${g.count}</span>
+      </div>
+      <div class="group-risk">
+        ${g.by_risk?.high ? `<span class="risk-dot high" title="${t('riskDistribution')}: ${t('riskHigh')}">${g.by_risk.high}</span>` : ''}
+        ${g.by_risk?.medium ? `<span class="risk-dot medium" title="${t('riskDistribution')}: ${t('riskMedium')}">${g.by_risk.medium}</span>` : ''}
+        ${g.by_risk?.low ? `<span class="risk-dot low" title="${t('riskDistribution')}: ${t('riskLow')}">${g.by_risk.low}</span>` : ''}
+        ${g.platform_count > (g.platforms ? Object.keys(g.platforms).length : 0)
+          ? `<span class="risk-more">+${g.platform_count - Object.keys(g.platforms || {}).length}</span>` : ''}
+      </div>
+      <div class="group-plats">${plats}</div>
+      <div class="group-actions">
+        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();filterByGroup('${id}')">${t('groupFilter')}</button>
+        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();selectGroup('${id}')">${t('groupSelect')}</button>
+      </div>
+    </div>`;
+  }).join('');
+  host.querySelectorAll('.group-card').forEach(card => {
+    card.addEventListener('click', () => filterByGroup(card.dataset.area));
+  });
+}
+
+function filterByGroup(areaId) {
+  // Clicking the active group clears it: a filter you cannot switch off is a
+  // filter you will forget is on.
+  groupFilter = (groupFilter !== null && String(groupFilter) === String(areaId)) ? null : areaId;
+  renderGroupStrip();
+  applyFilters();
+}
+
+function selectGroup(areaId) {
+  const ids = allResults.filter(r => String(r.area_id === null ? '' : r.area_id) === String(areaId))
+                        .map(r => r.entity_id);
+  ids.forEach(id => selectedIds.add(id));
+  updateSelectionUI();
+  toast(t('groupSelected', { n: ids.length }), 'info');
+}
+
+function displayResults(results, groups) {
   allResults = results;
+  // Drop a stale group filter when a new scan arrives without groups, or the
+  // table would stay empty with no visible reason why.
+  if (groups !== undefined) {
+    resultGroups = Array.isArray(groups) ? groups : [];
+    if (groupFilter && !resultGroups.some(g => String(g.area_id) === String(groupFilter))) {
+      groupFilter = null;
+    }
+  } else {
+    resultGroups = [];
+    groupFilter = null;
+  }
   document.getElementById('btnSelectAll').disabled = results.length === 0;
+  renderGroupStrip();
   applyFilters();
   // Always recalculate health from the actual results loaded
   recalcHealthFromResults();
@@ -1995,8 +2094,15 @@ function applyFilters() {
   const cat = document.getElementById('filterCat').value;
   const yaml = document.getElementById('filterYaml').value;
   const state = document.getElementById('filterState').value;
+  const activeGroup = (groupFilter === null || groupFilter === undefined) ? null : groupFilter;
 
   filteredResults = allResults.filter(r => {
+    // `undefined` is "no group" too. Testing only against null made an
+    // omitted argument mean "filter to the empty string", which empties the
+    // table instead of showing everything - the worst possible reading of it.
+    // Kept inside the callback on purpose: the filter test lifts this body out
+    // of the file verbatim, so anything it depends on has to live in it.
+    const activeGroup = (groupFilter === null || groupFilter === undefined) ? null : groupFilter;
     if (search && !r.entity_id.toLowerCase().includes(search) && !r.name.toLowerCase().includes(search)) return false;
     if (risk && r.risk_level !== risk) return false;
     if (cat && r.category !== cat) return false;
@@ -2004,6 +2110,7 @@ function applyFilters() {
     if (yaml === 'registry' && r.is_yaml_entity) return false;
     if (state === 'enabled' && r.disabled) return false;
     if (state === 'disabled' && !r.disabled) return false;
+    if (activeGroup !== null && String(r.area_id === null ? '' : r.area_id) !== String(activeGroup)) return false;
     return true;
   });
 
@@ -2584,7 +2691,7 @@ async function _reloadScanList() {
     if (typeof loadResults === 'function') { await loadResults(); return; }
     if (Array.isArray(allResults)) {
       const fresh = extractData(await callService('ha_optimizer', 'get_results', {}));
-      if (fresh && Array.isArray(fresh.results)) displayResults(fresh.results);
+      if (fresh && Array.isArray(fresh.results)) displayResults(fresh.results, fresh.groups);
     }
   } catch(e) { /* the trash view is what the user is looking at */ }
 }
@@ -2706,7 +2813,7 @@ async function restoreEntity(id, btn) {
     try {
       const fresh = extractData(await callService('ha_optimizer', 'get_results', {}));
       if (fresh && Array.isArray(fresh.results)) {
-        displayResults(fresh.results);
+        displayResults(fresh.results, fresh.groups);
         updateStats(fresh.statistics || {});
         localStorage.setItem('ha_optimizer_results', JSON.stringify(fresh));
       }
@@ -4107,6 +4214,10 @@ const I18N = {
     thDisabledAt: 'Disabled At',
     thExpiresIn: 'Auto-purge in',
     trashSummary: (p) => `${p.n} in the trash`,
+    groupFilter: 'Filter',
+    groupSelect: 'Select all',
+    groupSelected: (p) => `${p.n} selected`,
+    groupNoArea: 'No area',
     trashRestoreAll: 'Restore all',
     trashRestoreAllConfirm: (p) => `Re-enable all ${p.n} entities in the trash?\n\nNothing is deleted — this only undoes a soft delete.`,
     trashRestoreAllDone: (p) => `♻️ Restored ${p.n} entities from the trash`,
@@ -4567,6 +4678,10 @@ const I18N = {
     thDisabledAt: '禁用时间',
     thExpiresIn: '自动清理倒计时',
     trashSummary: (p) => `回收站里有 ${p.n} 个`,
+    groupFilter: '筛选',
+    groupSelect: '全选',
+    groupSelected: (p) => `已选中 ${p.n} 个`,
+    groupNoArea: '未分配区域',
     trashRestoreAll: '一键恢复全部',
     trashRestoreAllConfirm: (p) => `重新启用回收站里的全部 ${p.n} 个实体？\n\n不会删除任何东西——这只是撤销软删除。`,
     trashRestoreAllDone: (p) => `♻️ 已从回收站恢复 ${p.n} 个实体`,

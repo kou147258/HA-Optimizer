@@ -10,10 +10,14 @@ defect class cost a new pair of files, a new CI step, and a fresh round of
 debugging the same tools. So this runs all of them and normalises the output.
 
     python3 tools/audit.py                     every check
-    python3 tools/audit.py --list              names only
-    python3 tools/audit.py i18n restore        only the named checks
-    python3 tools/audit.py --json report.json  machine-comparable output
-    python3 tools/audit.py --verbose           show each tool's own output
+    python3 tools/audit.py list                names only
+    python3 tools/audit.py check i18n restore  only the named checks
+    python3 tools/audit.py check --json r.json machine-comparable output
+    python3 tools/audit.py check --verbose     show each tool's own output
+    python3 tools/audit.py build               build + verify the package
+    python3 tools/audit.py release 1.7.11      verify, tag, publish, read back
+    python3 tools/audit.py release 1.7.11 --dry-run
+    python3 tools/audit.py verify 1.7.10       what GitHub serves, checked
 
 Output is one line per check in a fixed order, so two runs can be diffed:
 
@@ -22,8 +26,8 @@ Output is one line per check in a fixed order, so two runs can be diffed:
 
 Release:
 
-    python3 tools/audit.py release 1.7.11 --dry-run
     python3 tools/audit.py release 1.7.11
+    python3 tools/audit.py release 1.7.11 --dry-run
     python3 tools/audit.py build            just build + verify the package
     python3 tools/audit.py verify 1.7.11    download what GitHub serves and
                                             check the CONTENT, not the hash
