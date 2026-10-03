@@ -239,6 +239,8 @@ TOOL_CHECKS: list[tuple[str, str, list[str]]] = [
      ["test_check_tools.py"]),
     ("tools.reach_verdict.cp", "the unreachable-tail check can still fail",
      ["counterproof_check_tools.py"]),
+    ("release.bom", "the release survives a title file with a BOM",
+     ["test_release_text.py"]),
 ]
 
 
@@ -476,10 +478,19 @@ def verify_served(tag: str, tree7: str, audit: Audit) -> None:
 def do_release(version: str, dry_run: bool, notes: Path, title: Path,
                notes_only: bool = False) -> int:
     tag = f"v{version}"
-    text = title.read_text(encoding="utf-8").strip()
-    body = notes.read_text(encoding="utf-8")
+    # A BOM is stripped rather than obeyed. PowerShell's `Set-Content -Encoding
+    # UTF8` writes one, and reading a title that carries it put U+FEFF in
+    # front of the release name - which then could not even be printed on a
+    # gbk console, so the release died after packaging and before tagging.
+    # `.strip()` does not remove it, and it is invisible in most editors, which
+    # is why it survived two attempts to write the same file.
+    text = title.read_text(encoding="utf-8-sig").strip()
+    body = notes.read_text(encoding="utf-8-sig")
     if "\ufffd" in text + body:
         print("ABORT: replacement character in the release text")
+        return 1
+    if not text or not body:
+        print("ABORT: empty title or body")
         return 1
 
     if notes_only:
@@ -537,11 +548,13 @@ def do_release(version: str, dry_run: bool, notes: Path, title: Path,
         return 1
     print("package verifies:", len(files), "files")
 
-    text = title.read_text(encoding="utf-8").strip()
-    body = notes.read_text(encoding="utf-8")
-    if "\ufffd" in text + body:
-        print("ABORT: replacement character in the release text")
-        return 1
+    # No second read of the title here. There was one, with encoding="utf-8",
+    # and it silently overwrote the BOM-stripped read above - so a title file
+    # written by PowerShell's default `Set-Content -Encoding UTF8` still
+    # arrived with a U+FEFF in front of it, and the release died here with a
+    # UnicodeEncodeError on a gbk console, after packaging and before tagging.
+    # The same duplicate-block shape that made thirteen assertions in
+    # test_trace_join.py unreachable.
     print(f"title   : {text}")
     print(f"body    : {len(body)} chars")
     if dry_run:
