@@ -5710,7 +5710,11 @@ function _startSysbarLoop() {
     // needle behind a dimmed dialog is what drew the eye.
     const modalOpen = document.getElementById('purgeModal') &&
       document.getElementById('purgeModal').style.display !== 'none';
-    if (!addonTabVisible && !modalOpen) {
+    // A hidden tab is not being read, and this is a supervisor round trip every
+    // ten seconds. It resumes by itself on the next tick after the tab is shown,
+    // so there is no state to unwind.
+    const watching = !document.hidden;
+    if (!addonTabVisible && !modalOpen && watching) {
       await _fetchSysBarOnly();
     }
     _sysbarTimer = setTimeout(_tick, SYSBAR_INTERVAL);
@@ -5802,6 +5806,7 @@ function _fmtBytes(mb) {
 }
 
 // ── Semi-circle gauge helpers ────────────────────────────────────
+const _gaugeLast = {};
 function _updateGauge(key, pct) {
   // Use stroke-dasharray on a colored arc to show fill up to pct
   // Arc radius=40, center=(45,46), semi-circle → arc length = PI*40 ≈ 125.66
@@ -5812,11 +5817,20 @@ function _updateGauge(key, pct) {
   const p = Math.max(0, Math.min(100, pct || 0));
   // dasharray: filled portion, then gap
   const filled = (p / 100 * ARC_LEN).toFixed(2);
-  fillArc.setAttribute('stroke-dasharray', filled + ' ' + ARC_LEN);
   // Needle angle: p=0 → PI (left), p=100 → 0 (right)
   const angle = Math.PI * (1 - p / 100);
   const cx = (45 + 40 * Math.cos(angle)).toFixed(2);
   const cy = (46 - 40 * Math.sin(angle)).toFixed(2);
+  // The needle carries a CSS transition, so writing the same coordinates is not
+  // a no-op: it starts a fresh animation every tick. On an idle machine that
+  // meant three needles moving every ten seconds for no change at all, which
+  // is the "something is always moving" the 1.7.6 flicker fix was chasing.
+  // The percentages are rounded to whole numbers, so a gauge that has not
+  // really moved is left completely alone.
+  const sig = filled + '|' + cx + '|' + cy;
+  if (_gaugeLast[key] === sig) return;
+  _gaugeLast[key] = sig;
+  fillArc.setAttribute('stroke-dasharray', filled + ' ' + ARC_LEN);
   needle.setAttribute('cx', cx);
   needle.setAttribute('cy', cy);
 }
@@ -5835,7 +5849,12 @@ function _renderSysBar(h) {
   const rC = rPct != null ? _pctColor(rPct) : 'var(--primary)';
   const dC = dPct != null ? _pctColor(dPct) : 'var(--primary)';
 
-  const _set = (id, v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
+  // Writing identical text still costs a style recalculation on a node that
+  // carries a `transition: color`, so the same check applies here.
+  const _set = (id, v) => {
+    const e = document.getElementById(id);
+    if (e && e.textContent !== v) e.textContent = v;
+  };
   const _setStyle = (id, prop, v) => { const e=document.getElementById(id); if(e) e.style[prop]=v; };
 
   // CPU gauge
