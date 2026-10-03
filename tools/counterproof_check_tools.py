@@ -43,7 +43,7 @@ CASES = [
      '    text = title.read_text(encoding="utf-8-sig").strip()\n',
      '    text = title.read_text(encoding="utf-8-sig").strip()\n'
      '    text = title.read_text(encoding="utf-8").strip()\n',
-     "no BOM reaches the printed title"),
+     "no BOM reaches anything the release printed"),
 ]
 
 missed = 0
