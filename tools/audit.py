@@ -207,8 +207,14 @@ def gh(args: list[str], stdin: bytes | None = None, timeout: int = 300) -> str:
 # the checks keep their own text and the report stays one format.
 TOOL_CHECKS: list[tuple[str, str, list[str]]] = [
     ("i18n.dictionary", "translation dictionaries agree", ["check_i18n.py"]),
+    ("i18n.param_shapes", "a translated string is called with the shape it reads",
+     ["test_i18n_param_shapes.py"]),
+    ("i18n.param_shapes.cp", "the param-shape check can still fail",
+     ["counterproof_i18n_param_shapes.py"]),
     ("version.sources", "all version sources agree", ["check_version.py"]),
     ("purge.safety", "purge safety regressions", ["test_purge_safety.py"]),
+    ("purge.tracking", "a disabled entity is recorded before the next is disabled",
+     ["test_purge_tracking.py"]),
     ("panel.sync", "panel and service registration", ["test_panel_sync.py"]),
     ("panel.build_stamp", "build stamp and cache busting", ["test_build_stamp.py"]),
     ("panel.filters", "filter behaviour", ["test_filters.js"]),
@@ -221,6 +227,8 @@ TOOL_CHECKS: list[tuple[str, str, list[str]]] = [
     ("safety.gate", "the gate on the irreversible job", ["test_safety_gate.py"]),
     ("safety.gate.cp", "safety gate checks can still fail", ["counterproof_safety_gate.py"]),
     ("store.concurrency", "store locking and merging", ["test_store_concurrency.py"]),
+    ("store.records", "trash records are copied, and 0 days expires nothing",
+     ["test_store_records.py"]),
     ("fail.loud", "no silent failures", ["test_fail_loud.py"]),
     ("compat.claims", "compatibility claims", ["test_compat_claims.py"]),
     ("live_log", "live-log regressions", ["test_live_log_findings.py"]),
@@ -232,6 +240,10 @@ TOOL_CHECKS: list[tuple[str, str, list[str]]] = [
     ("identity.rename.cp", "identity checks can still fail", ["counterproof_rename_identity.py"]),
     ("source.trace_join", "traces are read the way HA stores them", ["test_trace_join.py"]),
     ("source.trace_join.cp", "trace-join checks can still fail", ["counterproof_trace_join.py"]),
+    # It was on disk for releases and never listed here, so it had been failing
+    # silently - which is how a stub went stale against the code it was checking.
+    ("source.untraced_lists", "automations are listed even with no traces",
+     ["test_untraced_lists.py"]),
     ("source.py_names", "every name the component calls is defined", ["test_py_names.py"]),
     ("source.py_names.cp", "py-name checks can still fail", ["counterproof_py_names.py"]),
     ("source.recorder_sql", "SQL columns exist in the recorder schema", ["test_recorder_sql.py"]),

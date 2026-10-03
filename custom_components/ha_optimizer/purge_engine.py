@@ -19,6 +19,28 @@ _LOGGER = logging.getLogger(__name__)
 _RELOADABLE_DOMAINS = frozenset({"automation", "script"})
 
 
+async def _record_if_callbacked(callback, entity_id: str, results: dict) -> None:
+    """Persist a trash record for an entity the engine has just left disabled.
+
+    A hard delete that could only disable has left the entity in exactly the
+    state a soft delete does, so it needs the same record - without one it is
+    disabled, untracked, and unrestorable. The failure is reported rather than
+    raised: the entity is already disabled and nothing here can undo that, so
+    the honest outcome is a named gap in the result, not an exception that
+    abandons the rest of the batch.
+    """
+    if callback is None:
+        return
+    try:
+        await callback(entity_id)
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.error(
+            "Left %s disabled but could not record it in the trash (%s). It "
+            "cannot be restored from here - re-enable it manually.", entity_id, exc,
+        )
+        results.setdefault("untracked", []).append(entity_id)
+
+
 class PurgeEngine:
     """Handles the actual deletion/disabling of entities."""
 
@@ -26,9 +48,16 @@ class PurgeEngine:
         self.hass = hass
 
     async def async_purge_entities(
-        self, entity_ids: list[str], soft_delete: bool = True
+        self, entity_ids: list[str], soft_delete: bool = True,
+        on_left_disabled=None,
     ) -> dict[str, Any]:
-        """Purge a list of entities. Returns results dict."""
+        """Purge a list of entities. Returns results dict.
+
+        `on_left_disabled` is awaited with each entity_id immediately after it
+        has been disabled, so the caller can persist the trash record next to
+        the registry write instead of after the whole batch. It is a parameter
+        rather than a store reference so this engine stays testable on its own.
+        """
         results = {
             "success": [],
             "failed": [],
@@ -67,7 +96,12 @@ class PurgeEngine:
                     if outcome == "removed":
                         results["success"].append(entity_id)
                     elif outcome == "disabled":
+                        # Disabled is disabled: it needs a trash record
+                        # exactly as a soft delete does. The difference is
+                        # only that this was asked to remove it.
                         results["disabled_only"].append(entity_id)
+                        await _record_if_callbacked(
+                            on_left_disabled, entity_id, results)
                     else:
                         # Not in the registry, and `_remove_by_domain` could not
                         # remove it either - which is what it returns for every
@@ -100,6 +134,19 @@ class PurgeEngine:
                             results["already_disabled"].append(entity_id)
                         # Either way it goes into soft_deleted (= tracked in trash)
                         results["soft_deleted"].append(entity_id)
+                        # Recorded next to the registry write, like the branch
+                        # below: same reason, same window.
+                        if on_left_disabled is not None:
+                            try:
+                                await on_left_disabled(entity_id)
+                            except Exception as exc:  # noqa: BLE001
+                                _LOGGER.error(
+                                    "Soft-deleted %s but could not record it in the "
+                                    "trash (%s). It is disabled and cannot be restored "
+                                    "from here - re-enable it manually.", entity_id, exc,
+                                )
+                                results["untracked"] = results.get("untracked", [])
+                                results["untracked"].append(entity_id)
                     else:
                         outcome = await self._remove_by_domain(entity_id)
                         if outcome == "removed":
@@ -109,6 +156,8 @@ class PurgeEngine:
                             # a failed hard delete look completed, and the
                             # entity stopped being tracked in the trash.
                             results["disabled_only"].append(entity_id)
+                            await _record_if_callbacked(
+                                on_left_disabled, entity_id, results)
                         else:
                             results["yaml_manual"].append({
                                 "entity_id": entity_id,
@@ -148,6 +197,32 @@ class PurgeEngine:
                         results["already_disabled"].append(entity_id)
                     # Always track in soft_deleted (= goes to trash)
                     results["soft_deleted"].append(entity_id)
+                    # Record it in the trash NOW, not after the whole batch.
+                    # The two stores cannot be written in one transaction, and
+                    # the ordering was the dangerous way round: every entity in
+                    # the batch was disabled in the registry, and only when the
+                    # loop returned did the caller write a single trash record.
+                    # A stop, a crash or a disk error in between left entities
+                    # disabled with no record — unrestorable, invisible, and
+                    # nothing to repair from. This is called immediately after
+                    # the registry write, so the window is one entity instead of
+                    # the batch, which is the floor without a shared
+                    # transaction. It is optional so the engine stays testable.
+                    if on_left_disabled is not None:
+                        try:
+                            await on_left_disabled(entity_id)
+                        except Exception as exc:  # noqa: BLE001
+                            # The entity is disabled and the record did not
+                            # land. Say so loudly: this is the one case where
+                            # the user must be told, because nothing else will.
+                            _LOGGER.error(
+                                "Soft-deleted %s but could not record it in the trash "
+                                "(%s). It is disabled and cannot be restored from here - "
+                                "re-enable it manually or remove it from the registry.",
+                                entity_id, exc,
+                            )
+                            results["untracked"] = results.get("untracked", [])
+                            results["untracked"].append(entity_id)
                 else:
                     # Hard delete
                     ent_reg.async_remove(entity_id)

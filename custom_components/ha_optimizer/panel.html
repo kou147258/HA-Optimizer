@@ -2862,13 +2862,24 @@ function switchTab(name) {
 // between rendering and clicking.
 let _trashCount = 0;
 
+// `soft_delete_days: 0` is the documented "nothing ever expires" switch -
+// store.async_get_expired_soft_deleted treats <= 0 as no expiry at all. But
+// get_results still computes a days_left for every entry, and with 0 days
+// configured that lands on 0 for all of them, so the row rendered a red
+// "expires today" for an entry that cannot expire. The setting itself travels
+// with the list, so the panel can tell the two apart; the countdown column
+// reads the answer from here rather than from days_left alone.
+let _trashNeverExpires = false;
+
 function _expiryLabel(daysLeft) {
+  if (_trashNeverExpires) return t('expiryNever');
   if (daysLeft === null || daysLeft === undefined) return t('expiryUnknown');
   if (daysLeft < 0) return t('expiryOverdue', { n: Math.abs(daysLeft) });
   if (daysLeft === 0) return t('expiryToday');
   return t('expiryIn', { n: daysLeft });
 }
 function _expiryColor(daysLeft) {
+  if (_trashNeverExpires) return 'var(--text-muted)';
   if (daysLeft === null || daysLeft === undefined) return 'var(--text-muted)';
   if (daysLeft <= 2) return 'var(--danger)';
   if (daysLeft <= 7) return 'var(--medium-risk)';
@@ -2884,6 +2895,8 @@ async function loadSoftDeleted() {
     const data = extractData(raw);
 
     let softDeleted = [];
+    const rawDays = data && data.soft_delete_days;
+    _trashNeverExpires = rawDays === 0 || rawDays === '0';
     if (data && data.soft_deleted && typeof data.soft_deleted === 'object') {
       softDeleted = Object.entries(data.soft_deleted)
         .map(([entity_id, meta]) => ({
@@ -4144,7 +4157,7 @@ function renderFingerprintResults(d, ts) {
       <div class="stat-card">
         <div class="value" style="color:var(--primary); font-size:2rem">${hoursElapsed}h</div>
         <div class="label">${t('fpHoursElapsed')}</div>
-        <div style="font-size:0.72rem; color:var(--text-muted); margin-top:4px">${t('fpExtrapolate')}</div>
+        <div style="font-size:0.72rem; color:var(--text-muted); margin-top:4px">${t('fpHoursElapsedNote')}</div>
       </div>
     </div>
     <div style="background:rgba(255,152,0,0.08); border:1px solid rgba(255,152,0,0.2); border-radius:8px;
@@ -4164,8 +4177,18 @@ function renderFingerprintResults(d, ts) {
     anomalies.forEach(a => {
       const sevColor = a.severity === 'critical' ? 'var(--danger)' : 'var(--warning)';
       const sevIcon  = a.severity === 'critical' ? '🔴' : '🟡';
-      const arrow    = a.pct_change > 0 ? '↑' : '↓';
-      const barPct   = Math.min(Math.abs(a.pct_change), 400) / 4; // cap at 100px visual
+      // A baseline of all zeros makes every percentage undefined, and the
+      // backend says so with pct_change: null. It used to arrive here anyway:
+      // `null > 0` is false and `Math.abs(null)` is 0, so the page showed a
+      // confident "down 0%" for something it cannot measure. An unquantifiable
+      // deviation is shown as the absolute delta it does know, with no
+      // percentage and no direction.
+      const quantified = a.pct_change !== null && a.pct_change !== undefined;
+      const arrow    = quantified ? (a.pct_change > 0 ? '↑' : '↓') : '';
+      const headline = quantified
+        ? `${arrow}${Math.abs(a.pct_change)}%`
+        : `${a.delta > 0 ? '+' : ''}${a.delta} ${tVal(a.unit)}`;
+      const barPct   = quantified ? Math.min(Math.abs(a.pct_change), 400) / 4 : 0;
 
       // Mini sparkline SVG
       const spark = renderSparklineSVG(sparklines[a.metric] || []);
@@ -4184,8 +4207,10 @@ function renderFingerprintResults(d, ts) {
               <div style="font-size:0.82rem; color:var(--text-muted); margin-top:2px">${tVal(a.description)}</div>
             </div>
             <div style="text-align:right; flex-shrink:0">
-              <div style="font-size:1.6rem; font-weight:800; color:${sevColor}; line-height:1">${arrow}${Math.abs(a.pct_change)}%</div>
-              <div style="font-size:0.75rem; color:var(--text-muted)">vs ${t('fpVsAvg')} ${a.baseline_mean} ${tVal(a.unit)}/${t('fpPerDay')}</div>
+              <div style="font-size:1.6rem; font-weight:800; color:${sevColor}; line-height:1">${headline}</div>
+              ${quantified
+                ? `<div style="font-size:0.75rem; color:var(--text-muted)">vs ${t('fpVsAvg')} ${a.baseline_mean} ${tVal(a.unit)}/${t('fpPerDay')}</div>`
+                : `<div style="font-size:0.75rem; color:var(--text-muted)">${escapeHtml(t('fpNoBaseline'))}</div>`}
             </div>
           </div>
           <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px">
@@ -4197,7 +4222,7 @@ function renderFingerprintResults(d, ts) {
           <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
             <span class="reason-tag" style="background:var(--surface2)">${t('fpToday')}: <strong style="color:${sevColor}">${a.today} ${tVal(a.unit)}</strong></span>
             <span class="reason-tag" style="background:var(--surface2)">${t('fpBaselineAvg')}: ${a.baseline_mean} ${tVal(a.unit)}</span>
-            <span class="reason-tag" style="background:var(--surface2); color:var(--text-muted)">${t('fpMethod')}: ${a.method} · ${a.baseline_days} ${t('fpDays')}</span>
+            <span class="reason-tag" style="background:var(--surface2); color:var(--text-muted)">${t('fpMethod')}: ${escapeHtml(_fpMethodLabel(a.method))} · ${a.baseline_days} ${t('fpDays')}</span>
           </div>
           ${corrHtml}
         </div>`;
@@ -4210,12 +4235,12 @@ function renderFingerprintResults(d, ts) {
     <div class="stat-card" style="text-align:left; padding:16px; margin-bottom:16px">
       <h3 style="margin-bottom:14px; font-size:0.95rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em">📊 ${t('fpMetricsTitle')}</h3>
       <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px">
-        ${_fpMetricRow(t('fp_metric_total_writes'),       today.total_writes,        today.total_writes_raw,        t('fp_unit_times'),    hoursElapsed)}
-        ${_fpMetricRow(t('fp_metric_auto_triggers'),      today.automation_triggers, today.automation_triggers_raw, t('fp_unit_times'),    hoursElapsed)}
-        ${_fpMetricRow(t('fp_metric_unavail_events'),     today.unavail_events,      today.unavail_events_raw,      t('fp_unit_times'),    hoursElapsed)}
-        ${_fpMetricRow(t('fp_metric_active_entities'),    today.active_entities,     null,                          t('fp_unit_entities'), hoursElapsed)}
-        ${_fpMetricRow(t('fp_metric_db_size'),            today.db_size_mb,          null,                          'MB',                  null)}
-        ${_fpMetricRow(t('fp_metric_ha_lifecycle'),       today.ha_lifecycle_events, null,                          t('fp_unit_times'),    hoursElapsed)}
+        ${_fpMetricRow(t('fp_metric_total_writes'),       today.total_writes,        today.total_writes_raw,        t('fp_unit_times'),    hoursElapsed, partialDay)}
+        ${_fpMetricRow(t('fp_metric_auto_triggers'),      today.automation_triggers, today.automation_triggers_raw, t('fp_unit_times'),    hoursElapsed, partialDay)}
+        ${_fpMetricRow(t('fp_metric_unavail_events'),     today.unavail_events,      today.unavail_events_raw,      t('fp_unit_times'),    hoursElapsed, partialDay)}
+        ${_fpMetricRow(t('fp_metric_active_entities'),    today.active_entities,     today.active_entities_raw,     t('fp_unit_entities'), hoursElapsed, partialDay)}
+        ${_fpMetricRow(t('fp_metric_db_size'),            today.db_size_mb,          null,                          'MB',                  null, null)}
+        ${_fpMetricRow(t('fp_metric_ha_lifecycle'),       today.ha_lifecycle_events, today.ha_lifecycle_events_raw, t('fp_unit_times'),    hoursElapsed, partialDay)}
       </div>
     </div>`;
 
@@ -4246,19 +4271,71 @@ function renderFingerprintResults(d, ts) {
   c.innerHTML = html;
 }
 
-function _fpMetricRow(label, extrapolated, raw, unit, hoursElapsed) {
+/**
+ * One metric tile, and the only place the tab states a basis for a number.
+ *
+ * The backend is the sole authority on whether a value was scaled up to 24h:
+ * it sends the unscaled `<metric>_raw` counter next to every value it
+ * extrapolated, and sends nothing beside a value it left alone. So the label
+ * is derived from whether that counter arrived, not from a hardcoded list of
+ * metrics - a list went stale the moment fingerprint.py made another metric
+ * partial-day-aware, and the tile then kept claiming an extrapolation the
+ * number had never had.
+ *
+ * `hoursElapsed === null` means "not a rate over the day at all" (the database
+ * size is a snapshot), which is a third basis and used to be shown as if it
+ * were an extrapolated daily figure.
+ */
+function _fpMetricRow(label, extrapolated, raw, unit, hoursElapsed, partialDay) {
   if (extrapolated === undefined || extrapolated === null) return '';
-  const rawNote = (raw !== null && raw !== undefined && hoursElapsed && hoursElapsed < 23)
-    ? ` <span style="color:var(--text-muted); font-size:0.75rem">(${t('fpActual')}: ${raw})</span>`
-    : '';
+  const scaled = raw !== null && raw !== undefined;
+  // `partialDay` is passed in. It used to be read from `today`, which is a
+  // local inside renderFingerprintResults and therefore not in scope here -
+  // so the first tile threw a ReferenceError, the results were never written
+  // to the DOM, and the caller turned that into an error panel. The whole
+  // block parsed, which is why nothing static caught it.
+  if (partialDay === undefined || partialDay === null) {
+    partialDay = (hoursElapsed !== null && hoursElapsed !== undefined) && hoursElapsed < 23;
+  }
+  let basis = '';
+  if (scaled) {
+    // Scaled to a full day, so the unscaled count has to be on screen too -
+    // otherwise 1200 reads as a measurement rather than as a projection.
+    basis = partialDay
+      ? ` <span style="color:var(--text-muted); font-size:0.75rem">(${t('fpActual')}: ${raw}) · ${t('fpExtrapolate')}</span>`
+      : ` <span style="color:var(--text-muted); font-size:0.75rem">${t('fpExtrapolate')}</span>`;
+  } else if (hoursElapsed === null || hoursElapsed === undefined) {
+    // Checked BEFORE the partial-day branch: the database size is a snapshot
+    // and has no rate at all, and this branch used to be unreachable, which
+    // rendered "412.5 MB  nullh so far - not extrapolated".
+    basis = ` <span style="color:var(--text-muted); font-size:0.75rem">${t('fpBasisSnapshot')}</span>`;
+  } else if (partialDay) {
+    basis = ` <span style="color:var(--text-muted); font-size:0.75rem">${t('fpBasisPartialDay', { h: hoursElapsed })}</span>`;
+  } else {
+    basis = ` <span style="color:var(--text-muted); font-size:0.75rem">${t('fpNotJudged')}</span>`;
+  }
   return `<div style="padding:8px 10px; background:var(--surface2); border-radius:6px">
     <div style="font-size:0.78rem; color:var(--text-muted); margin-bottom:2px">${label}</div>
-    <div style="font-weight:700; font-size:1rem">${extrapolated} ${unit}${rawNote}</div>
+    <div style="font-weight:700; font-size:1rem">${extrapolated} ${unit}${basis}</div>
   </div>`;
 }
 
-function renderSparklineSVG(points) {
-  if (!points || points.length < 2) return '';
+/** A method name the backend may not have a label for is shown as it arrived.
+ *  The backend can add one - it added "zero-baseline" for the case where an
+ *  all-zero baseline makes every percentage undefined - and a raw key printed
+ *  in the middle of a translated page is a small enough failure that it is not
+ *  worth hiding the value to avoid. */
+function _fpMethodLabel(method) {
+  // 'sigma' and the glyph have both been emitted by this backend at
+  // different times, so both are mapped; an unmapped one falls through to
+  // the raw string rather than disappearing.
+  const key = { 'sigma': 'fpMethodSigma', 'σ': 'fpMethodSigma',
+                'IQR': 'fpMethodIqr', '“': 'fpMethodIqr',
+                'zero-baseline': 'fpMethodZeroBase' }[method];
+  return key ? t(key) : String(method);
+}
+
+function renderSparklineSVG(points) {  if (!points || points.length < 2) return '';
   const vals = points.map(p => p.value || 0);
   const maxV = Math.max(...vals, 1);
   const w = 80, h = 28, pad = 2;
@@ -4578,6 +4655,7 @@ const I18N = {
     expiryToday: 'today',
     expiryOverdue: (p) => `${p.n} day(s) overdue`,
     expiryUnknown: 'unknown',
+    expiryNever: 'never expires',
     cancel: 'Cancel',
     thAction: 'Action',
     emptyTrashMsg: 'No entities in trash yet',
@@ -4720,8 +4798,9 @@ const I18N = {
     fpAllNormal: 'Everything normal ✅',
     fpNeedsCheck: 'Needs review ⚠️',
     fpHoursElapsed: 'Hours elapsed today',
+    fpHoursElapsedNote: 'day not finished',
     fpExtrapolate: 'Extrapolated → 24h',
-    fpPartialDay: (h) => `Only ${h}h elapsed today — values extrapolated to 24h for fair baseline comparison.`,
+    fpPartialDay: (p) => `Only ${p.h}h of the day has elapsed — each metric below states its own basis: projected to 24h, or a count of today so far.`,
     fpSystemNormal: 'System operating normally',
     fpNoAnomalies: (d) => `No anomalies detected compared to the past ${d}-day baseline.`,
     fpVsAvg: 'Avg',
@@ -4730,10 +4809,12 @@ const I18N = {
     fpBaselineAvg: 'Baseline Avg',
     fpMethod: 'Method',
     fpDays: 'days',
-    fpMetricsTitle: 'Today\'s metrics (extrapolated 24h)',
+    fpMetricsTitle: 'Today\'s metrics (each one labelled)',
     fpUnitTimes: 'times',
     fpTopWritersTitle: 'Top writing entities today',
     fpActual: 'actual',
+    fpBasisPartialDay: (p) => `${p.h}h so far — not extrapolated`,
+    fpBasisSnapshot: 'current size, not a daily total',
     // Theme descriptions
     themeNameDefault: 'Deep Space',
     themeNamePurple: 'Midnight Purple',
@@ -4838,12 +4919,18 @@ const I18N = {
     fp_confidence_moderate: 'Moderate ({days} days) — results reliable',
     fp_confidence_high: 'High ({days} days) — stable baseline',
     fp_anomaly_desc: '{label} today: {val} {unit} ({direction} by {pct}% vs avg {mean} {unit}/day)',
+    fp_anomaly_desc_zero_base: '{label} today: {val} {unit} ({direction} {delta} {unit}/day vs an average of 0 over {days} day(s)) - there is no percentage to give, because every day on record was 0.',
+    fpNoBaseline: 'no baseline to compare against',
+    fpNotJudged: 'a full day, not projected',
+    fpMethodSigma: 'standard deviation', fpMethodIqr: 'interquartile range',
+    fpMethodZeroBase: 'no baseline (all days were zero)',
     fp_direction_higher: 'higher',
     fp_direction_lower: 'lower',
     fp_corr_restart: 'HA restart at {time} — may cause increased writes due to replay',
     fp_corr_reload: 'Integration load/reload at {time}',
     fp_corr_top_writer: '{entity} accounts for {pct}% of writes ({n} times) — possible loop/flapping',
     fp_corr_unavail: '{entity} went unavailable {n} times today',
+    fp_corr_top_writer_vs_base: '{entity} wrote {n} times today — above its own baseline peak of {base}',
     fp_no_recorder: 'Cannot read data from recorder DB',
     fp_metric_total_writes: 'State writes / day',
     fp_metric_auto_triggers: 'Automation triggers / day',
@@ -4873,6 +4960,7 @@ const I18N = {
     addonStopped2: (slug) => `Stopped ${slug}`,
     addonErrorTitle: 'Cannot load Add-on data',
     addonErrorDesc: 'Requires <strong>Home Assistant OS</strong> or <strong>Supervised</strong>.<br>HA Container / Core does not have Supervisor API.',
+    addonActionFailed: (p) => `Add-on action failed — ${p.why}`,
   
     reason_orphaned_official: 'Orphaned by HA for {days} days (official)',
     reason_unavailable_days: 'Unavailable for {days} days',
@@ -5090,6 +5178,7 @@ const I18N = {
     expiryToday: '今天到期',
     expiryOverdue: (p) => `已超期 ${p.n} 天`,
     expiryUnknown: '未知',
+    expiryNever: '永不过期',
     cancel: '取消',
     thAction: '操作',
     emptyTrashMsg: '回收站里还没有实体',
@@ -5253,8 +5342,9 @@ const I18N = {
     fpAllNormal: '一切正常 ✅',
     fpNeedsCheck: '需要检查 ⚠️',
     fpHoursElapsed: '今天已过小时数',
+    fpHoursElapsedNote: '今天尚未过完',
     fpExtrapolate: '已外推 → 24 小时',
-    fpPartialDay: (h) => `今天才过了 ${h} 小时 —— 数值已外推到 24 小时以便与基线公平比较。`,
+    fpPartialDay: (p) => `今天只过了 ${p.h} 小时 —— 下面每项指标都单独标注口径:已折算到 24 小时,还是今天截至目前的累计。`,
     fpSystemNormal: '系统运行正常',
     fpNoAnomalies: (d) => `与过去 ${d} 天的基线相比,未检测到异常。`,
     fpVsAvg: '平均',
@@ -5263,10 +5353,12 @@ const I18N = {
     fpBaselineAvg: '基线均值',
     fpMethod: '方法',
     fpDays: '天',
-    fpMetricsTitle: '今天的指标(已外推到 24 小时)',
+    fpMetricsTitle: '今天的指标(每项单独标注口径)',
     fpUnitTimes: '次',
     fpTopWritersTitle: '今天写入量最高的实体',
     fpActual: '实际',
+    fpBasisPartialDay: (p) => `截至目前 ${p.h} 小时 —— 未折算`,
+    fpBasisSnapshot: '当前大小,非当日累计',
     themeNameDefault: '深空',
     themeNamePurple: '午夜紫',
     themeNameForest: '暗夜森林',
@@ -5369,12 +5461,18 @@ const I18N = {
     fp_confidence_moderate: '中等({days} 天)—— 结果可靠',
     fp_confidence_high: '高({days} 天)—— 基线稳定',
     fp_anomaly_desc: '{label}今天:{val} {unit}(较均值 {mean} {unit}/天{direction} {pct}%)',
+    fp_anomaly_desc_zero_base: '{label}今天：{val} {unit}（{direction} {delta} {unit}/天，而 {days} 天的均值都是 0）—— 无法给出百分比，因为记录里每一天都是 0。',
+    fpNoBaseline: '没有可比较的历史基线',
+    fpNotJudged: '整天的计数，未折算',
+    fpMethodSigma: '标准差', fpMethodIqr: '四分位距',
+    fpMethodZeroBase: '没有基线（历史每天都为 0）',
     fp_direction_higher: '偏高',
     fp_direction_lower: '偏低',
     fp_corr_restart: 'HA 在 {time} 重启 —— 重放可能导致写入量增加',
     fp_corr_reload: '集成在 {time} 加载/重载',
     fp_corr_top_writer: '{entity} 占了总写入量的 {pct}%({n} 次)—— 可能存在循环或状态抖动',
     fp_corr_unavail: '{entity} 今天变为不可用 {n} 次',
+    fp_corr_top_writer_vs_base: '{entity} 今天写了 {n} 次 —— 超过它自己 {base} 次的基线峰值',
     fp_no_recorder: '无法从记录器数据库读取数据',
     fp_metric_total_writes: '状态写入/天',
     fp_metric_auto_triggers: '自动化触发/天',
@@ -5403,6 +5501,7 @@ const I18N = {
     addonStopped2: (slug) => `已停止 ${slug}`,
     addonErrorTitle: '无法加载插件数据',
     addonErrorDesc: '需要 <strong>Home Assistant OS</strong> 或 <strong>Supervised</strong>。<br>HA Container / Core 没有 Supervisor API。',
+    addonActionFailed: (p) => `插件操作失败 —— ${p.why}`,
   
     reason_orphaned_official: 'HA 已标记为孤立 {days} 天(官方字段)',
     reason_unavailable_days: '已不可用 {days} 天',
@@ -5814,7 +5913,11 @@ function _LOGGER_js(...args) { /* silent — use browser console */ }
 // Patch only CPU/RAM cells in existing table rows (fast, no flicker)
 function _patchAddonStats(addons) {
   addons.forEach(a => {
-    const slug = a.slug || '';
+    // The id in the markup was rendered escaped, and the id lookup here has to
+    // use the same escaped form or the lookup misses. (A review had this
+    // comment backwards - it said the slug is looked up raw, which is the case
+    // that would break.)
+    const slug = escapeHtml(a.slug || '');
     const cpuEl = document.getElementById(`cpu_${slug}`);
     const ramEl = document.getElementById(`ram_${slug}`);
     if (cpuEl) {
@@ -5951,40 +6054,76 @@ async function loadAddonTab() {
 }
 
 // ── Addon action buttons ─────────────────────────────────────────
+// A Supervisor action is a POST that carries a JSON object. Both transports
+// parse the body: HA's /api/hassio proxy does `await request.json()` and
+// answers 400 "Requires valid JSON" on an empty one, and on the Supervisor side
+// `@api_process` does the same for the `supervisor/api` websocket route. The
+// old request declared Content-Type: application/json, sent NO body and
+// spelled the verb lowercase - so every button has returned HTTP 400 since the
+// tab shipped, whatever the add-on was doing.
+//
+// `id` is deliberately absent: hass.callWS stamps its own message id on the
+// websocket frame, and the object passed in here is spread under it.
 async function _supervisorPost(path) {
-  // Try hass.callWS (Supervisor WebSocket API) first
+  const payload = {};
   const hass = _getHass();
+  // Every transport that refused is collected, not just the last one: the old
+  // code logged the websocket failure to the console and then reported only
+  // the REST failure, which showed the user an error for a request they never
+  // made. A 400 is a bug report, so it has to arrive with both reasons on it.
+  const why = [];
+
+  // Try hass.callWS (Supervisor WebSocket API) first
   if (hass?.callWS) {
     try {
-      const result = await hass.callWS({ type: 'supervisor/api', endpoint: path, method: 'post' });
+      const result = await hass.callWS({
+        type: 'supervisor/api', endpoint: path, method: 'POST', data: payload,
+      });
       if (result?.result === 'ok' || result) return result?.data ?? result;
+      why.push('WS: no result');
     } catch(wsErr) {
-      console.warn('[HAOptimizer] callWS supervisor failed, trying REST:', wsErr);
+      why.push(`WS: ${wsErr.message}`);
     }
   }
-  // Fallback: direct REST (works in ingress / trusted)
-  const res = await fetch(`/api/hassio${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-  if (!res.ok) throw new Error(`Supervisor ${path}: HTTP ${res.status}`);
-  const json = await res.json();
-  if (json.result !== 'ok') throw new Error(json.message || 'Supervisor error');
-  return json.data;
+
+  // Fallback: HA's own /api/hassio proxy (works in ingress / trusted). It
+  // authenticates with the long-lived token, not a cookie, so without the
+  // Authorization header this path only ever answered 401.
+  const authToken = hass?.auth?.data?.access_token
+    ?? hass?.connection?.options?.auth?.data?.access_token
+    ?? null;
+  const headers = { 'Content-Type': 'application/json' };
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+  try {
+    const res = await fetch(`/api/hassio${path}`, {
+      method: 'POST', headers, body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (json.result !== 'ok') throw new Error(json.message || 'Supervisor error');
+    return json.data;
+  } catch(restErr) {
+    why.push(`REST: ${restErr.message}`);
+  }
+
+  throw new Error(`${path} — ${why.join(' / ')}`);
 }
 async function addonUpdate(slug, btn) {
   if (!confirm(t('addonConfirmUpdate', slug))) return;
   btn.disabled = true; btn.textContent = '⏳';
   try { await _supervisorPost(`/addons/${slug}/update`); toast('success', `✅ ${t('addonUpdated', slug)}`); setTimeout(loadAddonTab, 3500); }
-  catch(e) { toast('error', `❌ ${e.message}`); btn.disabled=false; btn.textContent='🔼 '+t('addonUpdate'); }
+  catch(e) { toast('error', `❌ ${t('addonActionFailed', { why: e.message })}`); btn.disabled=false; btn.textContent='🔼 '+t('addonUpdate'); }
 }
 async function addonStart(slug, btn) {
   btn.disabled=true; btn.textContent='⏳';
   try { await _supervisorPost(`/addons/${slug}/start`); toast('success', `▶ ${t('addonStarted', slug)}`); setTimeout(loadAddonTab, 2000); }
-  catch(e) { toast('error', `❌ ${e.message}`); btn.disabled=false; btn.textContent='▶'; }
+  catch(e) { toast('error', `❌ ${t('addonActionFailed', { why: e.message })}`); btn.disabled=false; btn.textContent='▶'; }
 }
 async function addonStop(slug, btn) {
   if (!confirm(t('addonConfirmStop', slug))) return;
   btn.disabled=true; btn.textContent='⏳';
   try { await _supervisorPost(`/addons/${slug}/stop`); toast('success', `■ ${t('addonStopped2', slug)}`); setTimeout(loadAddonTab, 2000); }
-  catch(e) { toast('error', `❌ ${e.message}`); btn.disabled=false; btn.textContent='■'; }
+  catch(e) { toast('error', `❌ ${t('addonActionFailed', { why: e.message })}`); btn.disabled=false; btn.textContent='■'; }
 }
 
 // ── Rendering helpers ────────────────────────────────────────────
@@ -6080,7 +6219,7 @@ function _statusBadge(a) {
   if (a.update_available) return `<span class="_abadge" style="background:rgba(3,169,244,0.15);color:var(--primary);border-color:rgba(3,169,244,0.35)">🔼 ${t('addonUpdate')}</span>`;
   if (a.state==='started') return `<span class="_abadge" style="background:rgba(76,175,80,0.15);color:var(--success);border-color:rgba(76,175,80,0.35)">● ${t('addonRunning')}</span>`;
   if (a.state==='stopped') return `<span class="_abadge" style="background:rgba(244,67,54,0.15);color:var(--danger);border-color:rgba(244,67,54,0.35)">■ ${t('addonStopped')}</span>`;
-  return `<span class="_abadge" style="background:var(--surface2);color:var(--text-muted);border-color:var(--border)">${a.state||'—'}</span>`;
+  return `<span class="_abadge" style="background:var(--surface2);color:var(--text-muted);border-color:var(--border)">${escapeHtml(a.state||'—')}</span>`;
 }
 
 function _renderAddonList(addons) {
@@ -6129,31 +6268,40 @@ function _renderAddonList(addons) {
 
 function _addonRow(a) {
   const slug   = a.slug||'';
+  // Everything below comes from the Supervisor: the add-on's own name,
+  // version strings and slug are third-party text arriving over the API, and a
+  // name carrying a quote or a tag used to break this row's markup outright.
+  // The slug is also a JS argument inside an onclick attribute, where HTML
+  // escaping alone is not enough - escaping it would be undone again by the
+  // attribute's own decoding - so it is quoted as a JS string first and the
+  // result escaped for the attribute.
+  const slugArg = escapeHtml(JSON.stringify(slug));
+  const slugId  = escapeHtml(slug);
   const icon   = a.icon
-    ? `<img src="/api/hassio/addons/${slug}/icon" width="32" height="32" style="border-radius:7px;object-fit:cover;flex-shrink:0;display:block" onerror="this.style.display='none'">`
+    ? `<img src="/api/hassio/addons/${slugId}/icon" width="32" height="32" style="border-radius:7px;object-fit:cover;flex-shrink:0;display:block" onerror="this.style.display='none'">`
     : `<div style="width:32px;height:32px;border-radius:7px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:1.1rem">🧩</div>`;
   const verHtml = a.update_available
-    ? `<div style="font-size:0.8rem;line-height:1.5"><span style="color:var(--text-muted);text-decoration:line-through">${a.version||'—'}</span><br><span style="color:var(--primary);font-weight:700">→ ${a.version_latest||'?'}</span></div>`
-    : `<span style="font-size:0.83rem;color:var(--text-muted)">${a.version||'—'}</span>`;
+    ? `<div style="font-size:0.8rem;line-height:1.5"><span style="color:var(--text-muted);text-decoration:line-through">${escapeHtml(a.version||'—')}</span><br><span style="color:var(--primary);font-weight:700">→ ${escapeHtml(a.version_latest||'?')}</span></div>`
+    : `<span style="font-size:0.83rem;color:var(--text-muted)">${escapeHtml(a.version||'—')}</span>`;
   const cpuTxt   = a.cpu_percent!=null ? a.cpu_percent.toFixed(1)+'%' : '—';
   const cpuColor = a.cpu_percent!=null ? _pctColor(a.cpu_percent) : 'var(--text-muted)';
   const isRun    = a.state==='started';
   return `<tr>
     <td style="padding:8px 6px 8px 14px">${icon}</td>
     <td>
-      <div style="font-weight:600;font-size:0.9rem">${a.name||slug}</div>
-      <div style="font-size:0.72rem;color:var(--text-muted);font-family:monospace;margin-top:1px">${slug}</div>
+      <div style="font-weight:600;font-size:0.9rem">${escapeHtml(a.name||slug)}</div>
+      <div style="font-size:0.72rem;color:var(--text-muted);font-family:monospace;margin-top:1px">${slugId}</div>
     </td>
     <td>${verHtml}</td>
     <td>${_statusBadge(a)}</td>
-    <td style="text-align:right"><span id="cpu_${slug}" style="font-size:0.85rem;font-weight:600;color:${cpuColor}">${cpuTxt}</span></td>
-    <td style="text-align:right"><span id="ram_${slug}" style="font-size:0.85rem;color:var(--text-muted)">${a.memory_usage_mb!=null?_fmtBytes(a.memory_usage_mb):'—'}</span></td>
+    <td style="text-align:right"><span id="cpu_${slugId}" style="font-size:0.85rem;font-weight:600;color:${cpuColor}">${cpuTxt}</span></td>
+    <td style="text-align:right"><span id="ram_${slugId}" style="font-size:0.85rem;color:var(--text-muted)">${a.memory_usage_mb!=null?_fmtBytes(a.memory_usage_mb):'—'}</span></td>
     <td>
       <div style="display:flex;gap:5px;flex-wrap:wrap">
-        ${a.update_available ? `<button class="btn btn-primary" style="padding:4px 10px;font-size:0.78rem;gap:3px" onclick="addonUpdate('${slug}',this)" title="${t('addonUpdate')}">🔼 ${t('addonUpdate')}</button>` : ''}
-        ${!isRun ? `<button class="btn btn-ghost" style="padding:4px 10px;font-size:0.78rem;color:var(--success);border-color:rgba(76,175,80,0.4)" onclick="addonStart('${slug}',this)" title="${t('addonStart')}">▶</button>` : ''}
-        ${isRun  ? `<button class="btn btn-ghost" style="padding:4px 10px;font-size:0.78rem;color:var(--danger);border-color:rgba(244,67,54,0.3)" onclick="addonStop('${slug}',this)" title="${t('addonStop')}">■</button>` : ''}
-        <button class="btn btn-ghost" style="padding:4px 10px;font-size:0.78rem" onclick="haNavigate('/hassio/addon/${slug}/info')" title="${t('addonDetails')}">↗</button>
+        ${a.update_available ? `<button class="btn btn-primary" style="padding:4px 10px;font-size:0.78rem;gap:3px" onclick="addonUpdate(${slugArg},this)" title="${t('addonUpdate')}">🔼 ${t('addonUpdate')}</button>` : ''}
+        ${!isRun ? `<button class="btn btn-ghost" style="padding:4px 10px;font-size:0.78rem;color:var(--success);border-color:rgba(76,175,80,0.4)" onclick="addonStart(${slugArg},this)" title="${t('addonStart')}">▶</button>` : ''}
+        ${isRun  ? `<button class="btn btn-ghost" style="padding:4px 10px;font-size:0.78rem;color:var(--danger);border-color:rgba(244,67,54,0.3)" onclick="addonStop(${slugArg},this)" title="${t('addonStop')}">■</button>` : ''}
+        <button class="btn btn-ghost" style="padding:4px 10px;font-size:0.78rem" onclick="haNavigate('/hassio/addon/${slugId}/info')" title="${t('addonDetails')}">↗</button>
       </div>
     </td>
   </tr>`;
@@ -6214,7 +6362,7 @@ document.addEventListener('DOMContentLoaded', () => {
      The strip prints both, and a mismatch becomes visible instead of having to
      be inferred. Bumped with the version; check_build_stamp keeps it in step
      with const.py. -->
-<script>const PANEL_FILE_BUILD = '1.7.27';
+<script>const PANEL_FILE_BUILD = '1.7.28';
        const EXPECTED_TAB_COUNT = 10;</script>
 <script>
 /* What this browser actually loaded, as facts. The file on disk was correct

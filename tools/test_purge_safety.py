@@ -231,9 +231,26 @@ check("expiry path logs at warning level",
       re_warn := ("_LOGGER.warning(" in init_src.split("async def _async_check_soft_delete_expiry")[1][:4000]))
 check("entities that could not be removed stay tracked",
       "still_tracked" in init_src.split("async def _async_check_soft_delete_expiry")[1][:4000])
+_purge_body = init_src.split("def handle_purge")[1][:2500]
+# The invariant is "an entity the engine left disabled is in the trash". It used
+# to be satisfied by a batch write here, and it is now satisfied earlier and
+# more safely: the engine reports each entity the moment it disables it, and the
+# handler persists that. The batch write stayed for a while afterwards, where it
+# cost an extra save per purge and rewrote `disabled_at` on every record - so
+# asserting the call site here would have pinned a mechanism that is no longer
+# the right one, which is how an assertion outlives the design it was written
+# for. The invariant is asserted instead, and the mechanism by the engine check.
 check("purge service keeps disabled_only entities in the trash",
-      'result.get("disabled_only")' in init_src.split("def handle_purge")[1][:2500]
-      and "async_add_soft_deleted(result[\"disabled_only\"])" in init_src)
+      'result.get("untracked")' in _purge_body
+      and "on_left_disabled=_record" in _purge_body,
+      "the handler must record each entity as the engine disables it, and say "
+      "so when a record could not be written")
+check("the engine records every path that leaves an entity disabled",
+      _engine_records_all := (
+          (COMPONENT / "purge_engine.py").read_text(encoding="utf-8")
+          .count("_record_if_callbacked(") >= 3),
+      "a hard delete that could only disable disables just as a soft delete "
+      "does, and needs the same trash record")
 
 # `from __future__ import annotations` turns annotations into strings, and the
 # docstring explaining the fix still names the dead keys — so inspect the AST,

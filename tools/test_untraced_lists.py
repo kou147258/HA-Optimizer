@@ -17,10 +17,17 @@ COMP = Path(r"C:\Users\43457\.minimax\sessions\mvs_beb6ae963fc14d89832b6a57e91f7
 
 # ── stubs ──
 class Entry:
-    def __init__(self, entity_id, name, disabled=False, ceid=None):
+    # unique_id and platform are read by the code under test: a trace bucket is
+    # keyed by the automation's unique_id, and the join is built from the
+    # registry's own. A stub without them is not a stricter test, it is a stale
+    # one - and this file was never wired into audit.py, so it had been failing
+    # silently for releases.
+    def __init__(self, entity_id, name, disabled=False, ceid=None, unique_id=None):
         self.entity_id, self.domain = entity_id, entity_id.split(".")[0]
         self.name, self.original_name, self.disabled = name, name, disabled
         self.config_entry_id = ceid or f"ce-{name}"
+        self.unique_id = unique_id or entity_id.split(".", 1)[1]
+        self.platform = "demo"
 
 
 class EntReg:

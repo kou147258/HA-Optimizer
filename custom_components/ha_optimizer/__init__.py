@@ -596,17 +596,34 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
         entity_ids = call.data.get("entity_ids", [])
         soft = call.data.get("soft_delete", _entry_options(entry).get(CONF_ENABLE_SOFT_DELETE, DEFAULT_ENABLE_SOFT_DELETE))
         data = hass.data[DOMAIN][entry.entry_id]
-        result = await data["engine"].async_purge_entities(entity_ids, soft_delete=soft)
+        store = data["store"]
 
-        # Track soft-deleted entities (includes both newly disabled AND already_disabled)
-        if soft and result.get("soft_deleted"):
-            await data["store"].async_add_soft_deleted(result["soft_deleted"])
+        async def _record(entity_id: str) -> None:
+            # Persisted one entity at a time, from inside the engine's loop, so
+            # a stop or a disk error between "the registry says disabled" and
+            # "the trash knows about it" costs at most that one entity instead of
+            # the whole batch. Every path that leaves an entity disabled goes
+            # through this, including a hard delete that could only disable.
+            await store.async_add_soft_deleted([entity_id])
 
-        # A hard delete that only managed to disable the entity must still be
-        # tracked in the trash, otherwise the user has no way back: it is
-        # disabled, untracked, and nothing will ever restore or finish it.
-        if not soft and result.get("disabled_only"):
-            await data["store"].async_add_soft_deleted(result["disabled_only"])
+        result = await data["engine"].async_purge_entities(
+            entity_ids, soft_delete=soft, on_left_disabled=_record,
+        )
+
+        # No batch write of the soft-deleted ids here any more. It used to be
+        # the only record, and it stayed after the per-entity write was added -
+        # where it cost one more save per purge and rewrote `disabled_at` on
+        # every record to the batch time, resetting the expiry clock the
+        # per-entity write had just set correctly.
+
+        if result.get("untracked"):
+            # The one state with no way back: disabled in the registry, no
+            # trash record. Nothing in this integration can restore it, so the
+            # user is told in the response rather than left to find out.
+            _LOGGER.error(
+                "%d entity/entities are disabled with no trash record and cannot be "
+                "restored from here: %s", len(result["untracked"]), result["untracked"],
+            )
 
         if result.get("disabled_only"):
             _LOGGER.warning(
@@ -1378,7 +1395,11 @@ async def _async_restore_self_test(hass: HomeAssistant, entry: ConfigEntry,
         return False
     engine = data["engine"]
 
-    result = await _verified_restore(engine, hass, entity_id)
+    # The store is passed so a renamed entity can be resolved to its current
+    # id. Without it this call could not find the entity at all, the self-test
+    # failed, and the job stood down on every tick from then on - fail-closed,
+    # but the trash silently stopped expiring.
+    result = await _verified_restore(engine, hass, entity_id, store=data["store"])
     came_back = hass.states.get(entity_id) is not None
     if not (result.get("success") and came_back):
         _LOGGER.error(
@@ -1413,9 +1434,25 @@ async def _async_check_soft_delete_expiry(hass: HomeAssistant, entry: ConfigEntr
     if not data:
         return
     soft_days = _entry_options(entry).get(CONF_SOFT_DELETE_DAYS, DEFAULT_SOFT_DELETE_DAYS)
-    expired = await data["store"].async_get_expired_soft_deleted(soft_days)
-    if not expired:
+    store = data["store"]
+    expired_keys = await store.async_get_expired_soft_deleted(soft_days)
+    if not expired_keys:
         return
+
+    # `expired` holds the keys the trash was written under. For an entity that
+    # has since been renamed that is not its current id, and this job did not
+    # resolve it - unlike the manual empty-trash path, which does. So a single
+    # renamed record made the self-test below fail with "not found in
+    # registry", the job stood down, and nothing ever expired again. Resolve
+    # once, here, for both the self-test and the delete, and keep the original
+    # keys so the records are still dropped by the key they are stored under -
+    # no assumption about how the store matches them.
+    targets: dict[str, str] = {}
+    for key in expired_keys:
+        resolved = await store.async_resolve_soft_deleted(key)
+        target = resolved.get("entity_id") if isinstance(resolved, dict) else None
+        targets[key] = target or key
+    expired = sorted(set(targets.values()))
 
     if not await _async_restore_self_test(hass, entry, expired[0]):
         _async_raise_issue(
@@ -1450,7 +1487,11 @@ async def _async_check_soft_delete_expiry(hass: HomeAssistant, entry: ConfigEntr
             "Auto-expiry could not remove %d entity/entities, leaving them in the "
             "trash: %s", len(still_tracked), still_tracked,
         )
-    await data["store"].async_remove_soft_deleted(removed)
+    # Drop the records by the key they are stored under, which for a renamed
+    # entity is not the id the engine was given.
+    await store.async_remove_soft_deleted(
+        [k for k, v in targets.items() if v in removed]
+    )
 
     hass.bus.async_fire(EVENT_PURGE_COMPLETE, {
         "type": "auto_hard_delete",

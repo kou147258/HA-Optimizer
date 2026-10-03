@@ -260,8 +260,16 @@ class PurgeStore:
     
     
     async def async_get_soft_deleted(self) -> dict[str, dict]:
-        """Get all soft-deleted entities."""
-        return dict(self._soft_data)
+        """Get all soft-deleted entities, as records the caller may not keep.
+
+        A shallow copy shares the record dicts, so a reader that annotated one
+        was mutating live state outside the lock - and the next unrelated save
+        persisted it. The panel's results poll does exactly that: it writes
+        `status`, `current_entity_id`, `expires_at` and `days_left` into each
+        record it is handed. Those are display values, so the copy is right and
+        so is the write into it; what was wrong was the copy being shallow.
+        """
+        return {eid: dict(meta) for eid, meta in self._soft_data.items()}
 
     async def async_get_expired_soft_deleted(self, days: int) -> list[str]:
         """Return entity_ids that have been soft-deleted longer than `days`.
