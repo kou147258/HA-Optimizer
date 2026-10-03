@@ -1885,6 +1885,26 @@ function generateMockData() {
 // DISPLAY
 // ================================================================
 
+/**
+ * Escape text for interpolation into innerHTML.
+ *
+ * The rest of this file interpolates backend strings directly and mostly gets
+ * away with it, because the values are ids and counts. Two call sites are not
+ * that: an automation's name and the error text Home Assistant produced are both
+ * user-authored, and a name containing a quote or a tag would break the markup.
+ * The function is declared rather than the calls unwrapped, so the new code is
+ * correct instead of merely consistent with the looseness next to it.
+ */
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // ── Grouping by area ────────────────────────────────────────────────────────
 // A flat list of two thousand candidates is not a decision. "This integration,
 // in this room, 400 of them" is. So the strip is the primary control and the

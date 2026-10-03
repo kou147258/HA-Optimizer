@@ -232,12 +232,132 @@ def check_no_foreign_comments(root: Path) -> list[str]:
     return problems
 
 
+# ── a name is called that does not exist ─────────────────────────────────────
+# Neither py_compile nor `node --check` can see this: both validate syntax, not
+# names. The Dashboard tab called self._build_summary() on every click for
+# several releases and nothing here noticed, and a scan threw
+# "escapeHtml is not defined" because the panel has never had an escaping
+# helper and the new code assumed one.
+
+PY_BUILTIN = {
+    "print", "len", "str", "int", "float", "bool", "list", "dict", "set", "tuple",
+    "sorted", "sum", "min", "max", "round", "abs", "any", "all", "getattr",
+    "setattr", "hasattr", "isinstance", "enumerate", "zip", "map", "filter",
+    "range", "reversed", "type", "repr", "format", "super", "next", "iter",
+    "frozenset", "vars", "id", "open", "input", "exec", "eval",
+}
+
+
+def check_undefined_python_names(root: Path) -> list[str]:
+    import ast
+
+    problems = []
+    for f in sorted((root / "custom_components" / "ha_optimizer").glob("*.py")):
+        try:
+            tree = ast.parse(f.read_text(encoding="utf-8"))
+        except SyntaxError as exc:
+            problems.append(f"{f.name} does not parse: {exc}")
+            continue
+        file_classes = {n.name for n in tree.body if isinstance(n, ast.ClassDef)}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            # A class that inherits from anything defined elsewhere may well get
+            # the name from that base. Both `OptionsFlow` (a Name) and
+            # `config_entries.ConfigFlow` (an Attribute) are external, so any
+            # base that is not a class defined in this file disqualifies the
+            # class from being checked - config_flow's subclasses would
+            # otherwise be flagged for inheriting Home Assistant's own methods.
+            external = [ast.unparse(b) for b in node.bases
+                        if not (isinstance(b, ast.Name) and b.id in file_classes)]
+            if external:
+                continue
+            defined = {n.name for n in node.body
+                       if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+            for inner in ast.walk(node):
+                if (isinstance(inner, ast.Call)
+                        and isinstance(inner.func, ast.Attribute)
+                        and isinstance(inner.func.value, ast.Name)
+                        and inner.func.value.id == "self"
+                        and inner.func.attr not in defined
+                        and inner.func.attr not in PY_BUILTIN
+                        and not inner.func.attr.startswith("__")):
+                    problems.append(
+                        f"{f.name}:{inner.lineno} {node.name}.{inner.func.attr}() "
+                        f"is called but not defined in the class")
+    return problems
+
+
+JS_BUILTIN = {
+    "t", "if", "for", "while", "switch", "catch", "return", "typeof", "function",
+    "String", "Number", "Boolean", "Array", "Object", "JSON", "Math", "Date",
+    "parseInt", "parseFloat", "isNaN", "isFinite", "setTimeout", "clearTimeout",
+    "setInterval", "clearInterval", "requestAnimationFrame", "cancelAnimationFrame",
+    "console", "fetch", "encodeURIComponent", "decodeURIComponent", "structuredClone",
+    "Promise", "Error", "RegExp", "Map", "Set", "Symbol", "Intl", "FormData",
+    "Blob", "URL", "TextDecoder", "TextEncoder", "escape", "unescape", "async",
+    "await", "new", "typeof", "void", "delete", "in", "of", "this", "super", "yield",
+    "class", "extends", "do", "else", "try", "throw", "case", "default", "var",
+    "let", "const", "null", "true", "false", "undefined", "NaN", "Infinity",
+    "callService", "extractData", "haShowMoreInfo",  # panel-local, defined there
+    # CSS functions that survive the style-attribute strip because the panel
+    # also embeds CSS in template strings.
+    "rgba", "linear-gradient", "radial-gradient", "translateX", "translateY",
+    "gradient", "conic-gradient", "repeating-linear-gradient",
+    "translate", "scale", "rotate", "calc", "clamp", "var", "cubic-bezier",
+    "steps", "minmax", "repeat", "cubicBezier", "blur", "url", "counter",
+    "attr", "format", "min", "max", "abs", "pow", "sqrt", "round_", "wrap",
+}
+
+
+def check_undefined_js_names(root: Path) -> list[str]:
+    import re as _re
+
+    panel = (root / "custom_components" / "ha_optimizer" / "panel.html").read_text(encoding="utf-8")
+    declared = set(_re.findall(r"(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(", panel))
+    declared |= set(_re.findall(r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\s*)?\(", panel))
+    declared |= set(_re.findall(r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*\[[^\]]*\]\.map", panel))
+    # Object-literal members that hold functions, e.g. I18N entries.
+    declared |= set(_re.findall(r"^\s*([A-Za-z_$][\w$]*)\s*:\s*(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>", panel, _re.M))
+    declared |= set(_re.findall(r"^\s*([A-Za-z_$][\w$]*)\s*:\s*function", panel, _re.M))
+    declared |= set(_re.findall(r"^\s*([A-Za-z_$][\w$]*)\s*:\s*\(p\)\s*=>", panel, _re.M))
+    declared |= set(_re.findall(r"^\s*([A-Za-z_$][\w$]*)\s*:\s*(?:async\s*)?function", panel, _re.M))
+
+    # The <style> blocks are CSS, not JavaScript: linear-gradient(), rgba() and
+    # translateX() all live there and none of them is a function call.
+    panel = _re.sub(r"<style[\s\S]*?</style>", " ", panel)
+    scripts = _re.findall(r"<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)</script>", panel)
+    js = "\n".join(scripts)
+    # Inline style attributes live in the markup, not in the script, but the
+    # script builds plenty of them. rgba(), translateX() and friends would
+    # otherwise read as calls to functions that do not exist.
+    js = _re.sub(r'style\s*=\s*"[^"]*"', " ", js)
+    js = _re.sub(r"style\s*=\s*'[^']*'", " ", js)
+    # Drop comments, then string and template literals: a word that only appears
+    # inside a sentence or a stylesheet is not a call.
+    js = _re.sub(r"/\*[\s\S]*?\*/", " ", js)
+    js = _re.sub(r"(?m)^\s*//.*$", " ", js)
+    js = _re.sub(r"(?m)(?<![:\\])//[^\n\"']*$", " ", js)
+    js = _re.sub(r"`(?:\\.|[^`\\])*`", " ", js)
+    js = _re.sub(r"'(?:\\.|[^'\\])*'", " ", js)
+    js = _re.sub(r'"(?:\\.|[^"\\])*"', " ", js)
+    # Object method shorthand / class members are not free calls.
+    js = _re.sub(r"(?<![\w$])([A-Za-z_$][\w$]*)\s*:\s*function", " obj:", js)
+    js = _re.sub(r"(?<![\w$])([A-Za-z_$][\w$]*)\s*\(", r"\1(", js)
+
+    called = set(_re.findall(r"(?<![.\w$])([a-z_$][\w$]*)\s*\(", js))
+    missing = sorted(called - declared - JS_BUILTIN)
+    return [f"panel.html calls {m}() but nothing in the file defines it" for m in missing]
+
+
 CHECKS = [
     ("no flattened lines (python)", check_no_flattened_lines),
     ("no commented-out code (panel)", check_panel_no_commented_code),
     ("custom-card guard is an if/elif", check_custom_card_branch),
     ("marker is surfaced in the panel", check_marker_is_surfaced),
     ("no foreign-language comments", check_no_foreign_comments),
+    ("every self.<name>() is defined", check_undefined_python_names),
+    ("every bare JS call is defined", check_undefined_js_names),
 ]
 
 

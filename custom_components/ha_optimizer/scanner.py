@@ -275,7 +275,6 @@ class DataScanner:
     # How many integrations to name inside one area before the list stops being
     # a summary and becomes the flat list again.
     GROUP_TOP_PLATFORMS = 6
-
     def _build_groups(self, results: list[ScanResult]) -> list[dict[str, Any]]:
         """Summarise the candidates by area, naming the platforms inside each.
 
@@ -1310,6 +1309,81 @@ class DashboardAnalyzer:
     # ------------------------------------------------------------------
     # NEW — Recorder cross-reference + WebSocket pressure (analysis #1 & #3)
     # ------------------------------------------------------------------
+
+    # Severities the panel colours, in the order it shows them.
+    SEVERITIES = ("critical", "warning", "info")
+
+    def _build_summary(self, result: dict[str, Any]) -> dict[str, Any]:
+        """Count what the analysis found, by severity.
+
+        This method was called but never defined, so the Dashboard tab has been
+        raising since at least 1.7.9 - and the caller swallowed it into
+        `result["error"]`, which the panel renders as a red error box. Nothing
+        noticed because no check asked whether a called name exists.
+
+        The severity of each finding is carried on the entry itself, so this
+        counts what the analysis produced instead of re-judging it. A finding
+        with no severity of its own is not counted rather than being guessed
+        into the lowest bucket: an unlabelled finding is missing information,
+        not a small problem.
+        """
+        buckets: dict[str, int] = {s: 0 for s in self.SEVERITIES}
+        label_keys = {
+            "heavy_cards": ("dash_issue_heavy_cards", "critical"),
+            "heavy_graphs": ("dash_issue_heavy_graphs", "critical"),
+            "missing_entities": ("dash_issue_missing_entities", "warning"),
+            "unavailable_entities": ("dash_issue_unavailable", "warning"),
+            "duplicate_entities": ("dash_issue_duplicate", "warning"),
+            "ws_pressure": ("dash_issue_ws_pressure", "warning"),
+            "recorder_crossref": ("dash_issue_recorder", "warning"),
+            "unconfigured_custom_cards": ("dash_issue_custom_cards", "warning"),
+            "template_heavy_cards": ("dash_issue_template_cards", "info"),
+            "view_complexity": ("dash_issue_complex_views", "info"),
+        }
+
+        issues: list[dict[str, Any]] = []
+        for key, (label_key, default_sev) in label_keys.items():
+            entries = result.get(key) or []
+            if not isinstance(entries, list) or not entries:
+                continue
+            by_sev: dict[str, int] = {}
+            for e in entries:
+                if not isinstance(e, dict):
+                    continue
+                sev = e.get("severity") or default_sev
+                if sev in buckets:
+                    buckets[sev] += 1
+                    by_sev[sev] = by_sev.get(sev, 0) + 1
+            if not by_sev:
+                # Present but not countable: say so rather than dropping it.
+                by_sev[default_sev] = len(entries)
+                buckets[default_sev] = buckets.get(default_sev, 0) + len(entries)
+            for sev in self.SEVERITIES:
+                if by_sev.get(sev):
+                    issues.append({
+                        "severity": sev,
+                        "label": {"key": label_key},
+                        "count": by_sev[sev],
+                    })
+
+        findings = sum(buckets.values())
+        scored = {
+            "critical": 5,
+            "warning": 2,
+            "info": 1,
+        }
+        penalty = sum(scored[s] * n for s, n in buckets.items())
+        return {
+            "dashboard_score": max(0, 100 - penalty),
+            "total_critical": buckets["critical"],
+            "total_warning": buckets["warning"],
+            "total_info": buckets["info"],
+            "total_findings": findings,
+            "total_entity_refs": result.get("total_entity_refs", 0),
+            "total_dashboards": len(result.get("dashboards") or []),
+            "issues": issues,
+        }
+
     def _analyze_recorder_crossref(
         self,
         dashboard_entities: set[str],
