@@ -325,6 +325,31 @@ def main() -> int:
         if gap:
             problems.append(f"[{lang}] missing {len(gap)} backend-emitted key(s): {', '.join(gap[:8])}")
 
+    # The extraction above can only see keys written as literals. A key carried
+    # in a variable - which is how a table of labels is usually written - is
+    # invisible to it, and ten of those shipped as raw text on the panel because
+    # t() returns an unknown key unchanged.
+    #
+    # Narrowed deliberately: the first attempt matched any backend string that
+    # LOOKED like a key and reported fp_analyzer, fp_store and auto_purge_aborted
+    # - storage keys and repair ids, not translations. Matching every such string
+    # is the check-cries-wolf failure. What actually distinguishes a label table
+    # is a tuple-valued mapping whose first element is the key, so that is the
+    # only shape matched here.
+    label_table = re.compile(
+        r"[\"'][a-z0-9_]+[\"']\s*:\s*\(\s*[\"']((?:dash|fp|rec|scan|trash|impact|"
+        r"auto|group|writes)_[a-z0-9_]+)[\"']"
+    )
+    seen_tables: set[str] = set()
+    for name, src in py.items():
+        for m in label_table.findall(src):
+            seen_tables.add(m)
+    for m in sorted(seen_tables):
+        if m not in base_keys:
+            problems.append(
+                f"a label table carries the key {m!r} (through a variable) and "
+                f"{BASE} does not define it - t() will render the key itself")
+
     # every literal t('key') call site must exist
     called = set(CALL.findall(panel))
     bad_calls = sorted(called - base_keys)

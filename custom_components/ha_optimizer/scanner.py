@@ -1329,16 +1329,16 @@ class DashboardAnalyzer:
         """
         buckets: dict[str, int] = {s: 0 for s in self.SEVERITIES}
         label_keys = {
-            "heavy_cards": ("dash_issue_heavy_cards", "critical"),
-            "heavy_graphs": ("dash_issue_heavy_graphs", "critical"),
-            "missing_entities": ("dash_issue_missing_entities", "warning"),
-            "unavailable_entities": ("dash_issue_unavailable", "warning"),
-            "duplicate_entities": ("dash_issue_duplicate", "warning"),
-            "ws_pressure": ("dash_issue_ws_pressure", "warning"),
-            "recorder_crossref": ("dash_issue_recorder", "warning"),
-            "unconfigured_custom_cards": ("dash_issue_custom_cards", "warning"),
-            "template_heavy_cards": ("dash_issue_template_cards", "info"),
-            "view_complexity": ("dash_issue_complex_views", "info"),
+            "heavy_cards": ("dashIssueHeavyCards", "critical"),
+            "heavy_graphs": ("dashIssueHeavyGraphs", "critical"),
+            "missing_entities": ("dashIssueMissingEntities", "warning"),
+            "unavailable_entities": ("dashIssueUnavailable", "warning"),
+            "duplicate_entities": ("dashIssueDuplicate", "warning"),
+            "ws_pressure": ("dashIssueWsPressure", "warning"),
+            "recorder_crossref": ("dashIssueRecorder", "warning"),
+            "unconfigured_custom_cards": ("dashIssueCustomCards", "warning"),
+            "template_heavy_cards": ("dashIssueTemplateCards", "info"),
+            "view_complexity": ("dashIssueComplexViews", "info"),
         }
 
         issues: list[dict[str, Any]] = []
