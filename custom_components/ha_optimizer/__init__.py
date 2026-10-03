@@ -39,6 +39,8 @@ from .const import (
     SERVICE_SCAN,
     SERVICE_ANALYZE_FINGERPRINT,
     SERVICE_COLLECT_BASELINE,
+    SOFT_DELETE_STORE_KEY,
+    STORE_KEY,
 )
 from .purge_engine import PurgeEngine
 from .scanner import DataScanner, RecorderAnalyzer, DashboardAnalyzer, StateStormDetector, AutomationDeadCodeTracer, IntegrationHealthAnalyzer
@@ -65,6 +67,77 @@ PLATFORMS = []
 _WARNED_ONCE: set[str] = set()
 _LAST_WARNED: dict[str, float] = {}
 _WARN_THROTTLE_SECONDS = 300.0
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# ISSUES (homeassistant.helpers.issue_registry)
+#
+# Every silent failure in this integration so far reached the user as a line
+# in a log they had to find, recognise and paste. That is not a surface. Home
+# Assistant has a first-class one: `repairs`, which shows a persistent card in
+# the UI until someone deals with it.
+#
+# The two that matter most here are the two that have already cost real data
+# or real time:
+#   * a restore that reported success and left the entity gone
+#   * an unattended job that was told to delete and had to stand down
+#
+# Both are written as issues so they cannot be missed again, and both are
+# deleted as soon as the condition clears, so the card is never a lie about
+# the current state.
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def _async_raise_issue(
+    hass: HomeAssistant,
+    issue_id: str,
+    *,
+    severity: str = "warning",
+    entities: list[str] | None = None,
+    description: str = "",
+) -> None:
+    """Show a persistent issue in the Home Assistant UI.
+
+    Best effort by design: an integration must not fail because the repairs
+    platform is unavailable, and a missing card is much better than an
+    exception during an unrelated setup path.
+    """
+    try:
+        from homeassistant.helpers import issue_registry as ir
+    except ImportError:  # pragma: no cover - very old Home Assistant
+        _LOGGER.warning("issue_registry unavailable; %s: %s", issue_id, description)
+        return
+    placeholders: dict[str, str] = {"description": description}
+    if entities:
+        shown = ", ".join(entities[:10])
+        if len(entities) > 10:
+            shown += f", +{len(entities) - 10} more"
+        placeholders["entities"] = shown
+        placeholders["count"] = str(len(entities))
+    try:
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR if severity == "error" else ir.IssueSeverity.WARNING,
+            translation_key=issue_id,
+            translation_placeholders=placeholders,
+        )
+    except Exception as exc:  # pragma: no cover - never let reporting break the caller
+        _LOGGER.debug("Could not raise issue %s: %s", issue_id, exc)
+
+
+def _async_clear_issue(hass: HomeAssistant, issue_id: str) -> None:
+    """Drop an issue the moment its condition is gone."""
+    try:
+        from homeassistant.helpers import issue_registry as ir
+    except ImportError:  # pragma: no cover
+        return
+    try:
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
+    except Exception as exc:  # pragma: no cover
+        _LOGGER.debug("Could not clear issue %s: %s", issue_id, exc)
 
 
 async def _verified_restore(engine, hass: HomeAssistant, entity_id: str) -> dict:
@@ -113,6 +186,17 @@ async def _verified_restore(engine, hass: HomeAssistant, entity_id: str) -> dict
                     "reload it from the entity registry screen, or restart Home "
                     "Assistant"
                 )
+            _async_raise_issue(
+                hass,
+                "restore_did_not_complete",
+                severity="error",
+                entities=[entity_id],
+                description=(
+                    "The restore of " + entity_id + " reported success but the "
+                    "entity is not in the state machine. It stays in the trash - "
+                    "nothing was deleted - but it will not come back on its own."
+                ),
+            )
             _LOGGER.warning(
                 "Restore of %s reported success but the entity is not usable; "
                 "keeping it in the trash (%s)", entity_id, error,
@@ -124,6 +208,7 @@ async def _verified_restore(engine, hass: HomeAssistant, entity_id: str) -> dict
                 "error": error,
             }
     result.setdefault("entity_id", entity_id)
+    _async_clear_issue(hass, "restore_did_not_complete")
     return result
 
 
@@ -396,6 +481,48 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, svc)
 
     return True
+
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# REMOVAL
+#
+# Unregister cleanly - but deliberately KEEP the stored scan results and the
+# trash records.
+#
+# The obvious thing to do on uninstall is to delete `.storage/ha_optimizer*`,
+# and it is exactly the wrong thing. Those files are the safety net: they are
+# the only record of which entities were disabled and when, and the only way
+# to find out what a bad decision did. A user who removes this integration
+# *because* it misbehaved would lose the evidence at the exact moment they need
+# it, and reinstalling would silently resurrect a stale trash listing with
+# entries pointing at entities that no longer exist.
+#
+# So the files stay, and their location is logged. Removing them is a manual
+# decision by someone who has decided they do not want the record.
+# ══════════════════════════════════════════════════════════════════════════
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Unregister the panel and services; keep the records on disk."""
+    await async_unload_entry(hass, entry)
+
+    from homeassistant.helpers import storage as _storage
+
+    kept = []
+    for key in (STORE_KEY, SOFT_DELETE_STORE_KEY):
+        try:
+            path = Path(hass.config.config_dir) / ".storage" / key
+            if path.exists():
+                kept.append(str(path))
+        except Exception:  # pragma: no cover - purely informational
+            continue
+    if kept:
+        _LOGGER.warning(
+            "HA Optimizer was removed but its records were left in place, because "
+            "they are the only record of what was disabled and when: %s. Delete "
+            "them by hand if you really want them gone.", kept,
+        )
 
 
 # ================================================================
@@ -1121,6 +1248,46 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry):
     await hass.config_entries.async_reload(entry.entry_id)
 
 
+async def _async_restore_self_test(hass: HomeAssistant, entry: ConfigEntry,
+                                   entity_id: str) -> bool:
+    """Prove the safety net still works before anything irreversible runs.
+
+    The only way to know the restore path works is to restore something, so
+    this does a real round trip on ONE entity that was already scheduled for
+    permanent deletion - the cheapest possible place to spend a mutation,
+    because losing it costs nothing that was not about to be lost anyway.
+
+    A failure leaves that entity as it found it, and the caller abandons the
+    whole batch. Failing closed is the entire point: an unattended job that
+    cannot prove it can give things back must not delete anything.
+    """
+    data = hass.data[DOMAIN].get(entry.entry_id)
+    if not data:
+        return False
+    engine = data["engine"]
+
+    result = await _verified_restore(engine, hass, entity_id)
+    came_back = hass.states.get(entity_id) is not None
+    if not (result.get("success") and came_back):
+        _LOGGER.error(
+            "Restore self-test FAILED for %s (success=%s, back=%s, error=%s). "
+            "Auto-expiry is standing down; nothing will be deleted.",
+            entity_id, result.get("success"), came_back, result.get("error"),
+        )
+        return False
+
+    # Put it back the way we found it, so the test leaves no trace.
+    try:
+        await engine.async_purge_entities([entity_id], soft_delete=True)
+    except Exception as exc:  # pragma: no cover - best effort
+        _LOGGER.warning("Self-test could not re-disable %s: %s", entity_id, exc)
+        return False
+    _LOGGER.info(
+        "Restore self-test passed on %s; auto-expiry may proceed", entity_id,
+    )
+    return True
+
+
 async def _async_check_soft_delete_expiry(hass: HomeAssistant, entry: ConfigEntry):
     """Check for soft-deleted entities that have expired and hard-delete them.
 
@@ -1137,6 +1304,23 @@ async def _async_check_soft_delete_expiry(hass: HomeAssistant, entry: ConfigEntr
     expired = await data["store"].async_get_expired_soft_deleted(soft_days)
     if not expired:
         return
+
+    if not await _async_restore_self_test(hass, entry, expired[0]):
+        _async_raise_issue(
+            hass,
+            "auto_purge_aborted",
+            severity="error",
+            entities=expired,
+            description=(
+                f"{len(expired)} entity/entities have been in the trash for more than "
+                f"{soft_days} day(s) and are due for permanent deletion. That job "
+                "was NOT run: the restore path failed its self-test, so the tool "
+                "cannot prove it would be able to give these back. They are still "
+                "in the trash and nothing has been deleted."
+            ),
+        )
+        return
+    _async_clear_issue(hass, "auto_purge_aborted")
 
     _LOGGER.warning(
         "Auto-expiring %d soft-deleted entity/entities older than %d day(s): %s",

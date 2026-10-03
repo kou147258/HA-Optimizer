@@ -60,6 +60,13 @@ jobs:
       - name: Restore engine behaviour tests
         run: python3 tools/test_restore_engine.py
 
+      # The gate on the only irreversible job, and its counter-proofs.
+      - name: Safety gate checks
+        run: python3 tools/test_safety_gate.py
+
+      - name: Safety gate checks can still fail
+        run: python3 tools/counterproof_safety_gate.py
+
       - name: Compatibility claim checks
         run: python3 tools/test_compat_claims.py
 

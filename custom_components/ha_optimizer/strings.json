@@ -123,5 +123,15 @@
       "name": "Empty the trash",
       "description": "PERMANENTLY removes every entity currently in the trash. This cannot be undone and there is no second copy. Anything that cannot really be removed stays in the trash and is reported."
     }
+  },
+  "issues": {
+    "auto_purge_aborted": {
+      "title": "Automatic clean-up stopped: the restore self-test failed",
+      "description": "{count} entit(ies) have been in the trash for more than the retention period and are due for permanent deletion. The job did NOT run: the restore path failed its self-test, so the tool cannot prove it would be able to give these back. Affected: {entities}. Nothing has been deleted."
+    },
+    "restore_did_not_complete": {
+      "title": "A restore did not complete; the entity is still in the trash",
+      "description": "The restore reported success but the entity is not in the state machine. Nothing was deleted and the record is kept, but it will not come back on its own. Affected: {entities}. Reload the entity from the entity registry screen, or restart Home Assistant."
+    }
   }
 }
