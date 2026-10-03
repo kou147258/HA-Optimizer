@@ -6073,6 +6073,16 @@ async function _supervisorPost(path) {
   // made. A 400 is a bug report, so it has to arrive with both reasons on it.
   const why = [];
 
+  // The path comes from a slug the Supervisor supplied, so it is validated
+  // rather than escaped. Escaping is the wrong tool twice over: `escapeHtml`
+  // produces `&amp;` where a URL wants `%26`, and the browser would decode it
+  // again anyway. A Supervisor slug is an identifier - lowercase, digits and
+  // underscores - so anything else is a value that must not be interpolated
+  // into a request at all.
+  if (!/^\/addons\/[a-z0-9_]+\/[a-z]+$/.test(path)) {
+    throw new Error(`refusing to call ${JSON.stringify(path)}: not a plain add-on slug`);
+  }
+
   // Try hass.callWS (Supervisor WebSocket API) first
   if (hass?.callWS) {
     try {
@@ -6362,7 +6372,7 @@ document.addEventListener('DOMContentLoaded', () => {
      The strip prints both, and a mismatch becomes visible instead of having to
      be inferred. Bumped with the version; check_build_stamp keeps it in step
      with const.py. -->
-<script>const PANEL_FILE_BUILD = '1.7.28';
+<script>const PANEL_FILE_BUILD = '1.7.29';
        const EXPECTED_TAB_COUNT = 10;</script>
 <script>
 /* What this browser actually loaded, as facts. The file on disk was correct

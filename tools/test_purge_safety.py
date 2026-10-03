@@ -246,11 +246,28 @@ check("purge service keeps disabled_only entities in the trash",
       "the handler must record each entity as the engine disables it, and say "
       "so when a record could not be written")
 check("the engine records every path that leaves an entity disabled",
-      _engine_records_all := (
-          (COMPONENT / "purge_engine.py").read_text(encoding="utf-8")
-          .count("_record_if_callbacked(") >= 3),
+      (COMPONENT / "purge_engine.py").read_text(encoding="utf-8")
+      .count("_record_if_callbacked(") >= 3,
       "a hard delete that could only disable disables just as a soft delete "
       "does, and needs the same trash record")
+
+# The soft path records the whole batch BEFORE the engine disables anything.
+# The order is the invariant, not the mechanism: a crash between the two must
+# leave the trash over-describing an entity that is still enabled (visible,
+# harmless, ages out) rather than an entity that is disabled with no record
+# (invisible, unrestorable). The per-entity version was also correct, and cost
+# one awaited disk write per entity, because Store.async_save does not coalesce
+# - only async_delay_save does.
+_purge = init_src.split("def handle_purge")[1][:4000]
+_soft = _purge.split("if soft:")[1].split("else:")[0] if "if soft:" in _purge else ""
+check("a soft purge records the batch before it disables anything",
+      "async_add_soft_deleted(entity_ids)" in _soft
+      and _soft.index("async_add_soft_deleted(entity_ids)")
+      < _soft.index("async_purge_entities("),
+      "the record must be written first; see the comment in handle_purge")
+check("and the entities the engine refused are taken back out",
+      "async_remove_soft_deleted(sorted(refused))" in _soft,
+      "a safety device class or a YAML entity was recorded but never disabled")
 
 # `from __future__ import annotations` turns annotations into strings, and the
 # docstring explaining the fix still names the dead keys — so inspect the AST,

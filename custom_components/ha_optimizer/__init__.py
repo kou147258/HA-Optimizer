@@ -599,22 +599,39 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
         store = data["store"]
 
         async def _record(entity_id: str) -> None:
-            # Persisted one entity at a time, from inside the engine's loop, so
-            # a stop or a disk error between "the registry says disabled" and
-            # "the trash knows about it" costs at most that one entity instead of
-            # the whole batch. Every path that leaves an entity disabled goes
-            # through this, including a hard delete that could only disable.
+            # Used only by the hard-delete path, where a batch is small and the
+            # entity may end up disabled rather than removed. Every path that
+            # leaves an entity disabled goes through it.
             await store.async_add_soft_deleted([entity_id])
 
-        result = await data["engine"].async_purge_entities(
-            entity_ids, soft_delete=soft, on_left_disabled=_record,
-        )
-
-        # No batch write of the soft-deleted ids here any more. It used to be
-        # the only record, and it stayed after the per-entity write was added -
-        # where it cost one more save per purge and rewrote `disabled_at` on
-        # every record to the batch time, resetting the expiry clock the
-        # per-entity write had just set correctly.
+        if soft:
+            # Record FIRST, disable second. The order is the whole point: a
+            # stop or a crash between the two now leaves the trash holding an
+            # entry for an entity that is still enabled - visible, harmless, and
+            # it ages out or a restore says "not disabled". The other order
+            # leaves an entity disabled with no record, which nothing can undo.
+            #
+            # It is also one disk write instead of one per entity. The previous
+            # per-entity version was crash-safe and correct, but `Store.async_save`
+            # awaits the real write (only `async_delay_save` coalesces), so a
+            # 300-entity purge performed 300 of them inside the service call.
+            await store.async_add_soft_deleted(entity_ids)
+            result = await data["engine"].async_purge_entities(
+                entity_ids, soft_delete=True,
+            )
+            # The engine refused some - a safety device class, a YAML-defined
+            # entity it must not touch. Those were recorded but never disabled,
+            # so their records come back out; leaving them would put a live
+            # entity in the trash.
+            refused = set(result.get("skipped_high_risk", [])) | {
+                y["entity_id"] for y in result.get("yaml_manual", [])
+            } | {f["entity_id"] for f in result.get("failed", [])}
+            if refused:
+                await store.async_remove_soft_deleted(sorted(refused))
+        else:
+            result = await data["engine"].async_purge_entities(
+                entity_ids, soft_delete=False, on_left_disabled=_record,
+            )
 
         if result.get("untracked"):
             # The one state with no way back: disabled in the registry, no

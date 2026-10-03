@@ -255,6 +255,13 @@ class DataScanner:
                 "window_days": 30,
                 "alerts": sum(1 for r in results if r.write_alert),
             },
+            # The per-area numbers, under the key the panel has read since
+            # 1.7.11 and that was never sent: `by_area` was computed here
+            # and dropped, so all six of the panel's `displayResults(...)`
+            # call sites passed `undefined` and the per-area write line
+            # could not render. Separate from `write_measurement` on purpose:
+            # that one answers "could we measure", this one is the numbers.
+            "write_rollup": write_rollup["by_area"],
             "statistics": {
                 "total_entities": total,
                 "candidates_found": found,
