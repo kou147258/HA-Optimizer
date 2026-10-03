@@ -17,6 +17,18 @@ store** rather than the working copy (the worktree is CRLF under
 that differs byte-for-byte from the one on GitHub). Verified by expanding the
 downloaded release: 12 files, every one byte-identical to its object.
 
+## [1.7.7] - 2026-10-03
+
+用户问「更新到底生效没有」——这个问题当时无法回答。现在能了。
+
+### Fixed
+- 🗓️ **升级会被浏览器缓存挡住 31 天。** Home Assistant 给 `/local/` 下的静态文件发 `cache-control: public, max-age=2678400`。所以升级之后，已经打开的浏览器标签**可以整整一个月继续用旧面板**，而屏幕上没有任何东西说明这一点。现在 iframe 的 URL 带上了版本号（`panel.html?v=1.7.7`）——**换 URL 就是换缓存条目**，升级必然重新拉取。
+- 🏷️ **面板右下角显示当前构建号。** 同一个 `?v=` 也是面板自己 `location.search` 里读到的值——**一个来源**，不需要在复制文件时注入、不需要额外请求，也不会有第二处需要同步的地方。查不到版本时**明确显示 `(unversioned copy)`** 而不是留空：一个失效时变空白的徽标，和没有徽标是同一个问题。
+
+### Verified
+用面板**自己的样式**渲染过两种情况：带版本 → `v1.7.7`；不带版本 → `(unversioned copy)`。
+`tools/test_build_stamp.py`（12 项）钉住 iframe URL、徽标来源，以及**徽标的元素和样式都必须在所有 `@media` 之外**——1.7.5 就是死在这一条上。
+
 ## [1.7.6] - 2026-10-03
 
 1.7.5 写了 markup 和 CSS，但 **CSS 被放进了 `@media (max-width: 768px)` 里**。

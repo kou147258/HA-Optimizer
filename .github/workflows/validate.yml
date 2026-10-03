@@ -32,6 +32,9 @@ jobs:
       - name: Panel sync and service registration regression tests
         run: python3 tools/test_panel_sync.py
 
+      - name: Build stamp and cache-busting checks
+        run: python3 tools/test_build_stamp.py
+
       - name: Filter behaviour tests
         run: node tools/test_filters.js
 

@@ -30,6 +30,7 @@ from .const import (
     PANEL_ICON,
     PANEL_TITLE,
     PANEL_URL,
+    VERSION,
     SERVICE_GET_RESULTS,
     SERVICE_PURGE,
     SERVICE_RESTORE,
@@ -331,7 +332,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             sidebar_icon=PANEL_ICON,
             frontend_url_path=PANEL_URL,
             config={
-                "url": "/local/ha_optimizer/panel.html",
+                # The version in the query is not decoration. Home Assistant
+                # serves /local/ with `cache-control: public, max-age=2678400`
+                # - 31 days - so after an upgrade the browser keeps serving the
+                # PREVIOUS panel for a month, with nothing on screen saying
+                # which build is on it. A different URL is a different cache
+                # entry, so the upgrade is always fetched. The panel reads this
+                # same value to display its version.
+                "url": f"/local/ha_optimizer/panel.html?v={VERSION}",
                 "require_admin": True,
             },
             require_admin=True,
