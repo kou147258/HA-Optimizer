@@ -1,11 +1,11 @@
-"""Fingerprint Anomaly Detector — so sánh HA hôm nay với chính nó tuần trước.
+"""Fingerprint anomaly detector - compares today against the days before it.
 
-Kiến trúc:
-  DailyProfiler   — chạy lúc 00:05, chụp snapshot metrics của ngày hôm qua
-  FingerprintStore — lưu rolling window 30 ngày vào .storage/
-  SigmaDetector   — phát hiện anomaly: today vs rolling mean ± 2σ (IQR nếu <7 ngày)
-  CorrelationLinker — khớp timestamp anomaly với HA events (update, restart, reload)
-  FingerprintAnalyzer — entry point chính, gọi từ service analyze_fingerprint
+Architecture:
+  DailyProfiler   — runs at 00:05, snapshots yesterday's metrics
+  FingerprintStore — keeps a 30-day rolling window in .storage/
+  SigmaDetector   — flags anomalies: today vs rolling mean ± 2σ (IQR when <7 days)
+  CorrelationLinker — matches an anomaly's timestamp to HA events (update, restart, reload)
+  FingerprintAnalyzer — main entry point, called from the analyze_fingerprint service
 """
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ async def _run_in_db_executor(hass: HomeAssistant, target, *args):
 # ================================================================
 
 class FingerprintStore:
-    """Lưu và đọc baseline ngày theo ngày vào .storage/."""
+    """Store and read the per-day baselines in .storage/."""
 
     def __init__(self, hass: HomeAssistant):
         self._store = Store(hass, STORAGE_VERSION, FINGERPRINT_STORE_KEY)
@@ -75,7 +75,7 @@ class FingerprintStore:
         await self._purge_old_days()
 
     async def async_save_day(self, date_str: str, metrics: dict):
-        """Lưu metrics của một ngày cụ thể."""
+        """Store the metrics for one specific day."""
         self._data[date_str] = metrics
         await self._purge_old_days()
         await self._store.async_save({"days": self._data})
@@ -102,7 +102,7 @@ class FingerprintStore:
 # ================================================================
 
 class DailyProfiler:
-    """Chụp snapshot metrics của ngày hôm qua từ recorder DB."""
+    """Snapshot yesterday's metrics out of the recorder DB."""
 
     def __init__(self, hass: HomeAssistant):
         self.hass = hass
@@ -138,14 +138,14 @@ class DailyProfiler:
             metrics: dict[str, Any] = {"date": date_str}
 
             with instance.get_session() as session:
-                # 1. Tổng số state writes hôm qua
+                # 1. Total state writes yesterday
                 row = session.execute(text(f"""
                     SELECT COUNT(*) FROM states
                     WHERE last_updated_ts BETWEEN {ts_start} AND {ts_end}
                 """)).scalar()
                 metrics["total_writes"] = int(row or 0)
 
-                # 2. Top 10 entity writes nhiều nhất hôm qua
+                # 2. Top 10 entities by write count yesterday
                 rows = session.execute(text(f"""
                     SELECT entity_id, COUNT(*) as cnt
                     FROM states
@@ -158,7 +158,7 @@ class DailyProfiler:
                     {"entity_id": r[0], "writes": int(r[1])} for r in rows if r[0]
                 ]
 
-                # 3. Số lần automation trigger (event automation_triggered)
+                # 3. Automation triggers (event automation_triggered)
                 try:
                     auto_row = session.execute(text(f"""
                         SELECT COUNT(*) FROM events
@@ -169,8 +169,8 @@ class DailyProfiler:
                 except Exception:
                     metrics["automation_triggers"] = 0
 
-                # 4. Integration restart: đếm state chuyển về unavailable/unknown
-                #    theo platform — proxy tốt nhất không cần truy cập log file
+                # 4. Integration restarts: count states flipping to unavailable/unknown
+                #    per platform — the best proxy that needs no log file access
                 rows_restart = session.execute(text(f"""
                     SELECT entity_id, COUNT(*) as cnt
                     FROM states
@@ -186,14 +186,14 @@ class DailyProfiler:
                     {"entity_id": r[0], "count": int(r[1])} for r in rows_restart[:5]
                 ]
 
-                # 5. Unique entities active hôm qua
+                # 5. Unique entities active yesterday
                 uniq_row = session.execute(text(f"""
                     SELECT COUNT(DISTINCT entity_id) FROM states
                     WHERE last_updated_ts BETWEEN {ts_start} AND {ts_end}
                 """)).scalar()
                 metrics["active_entities"] = int(uniq_row or 0)
 
-                # 6. DB size hiện tại (MB)
+                # 6. Current DB size (MB)
                 try:
                     if is_mysql:
                         size_row = session.execute(text("""
@@ -212,7 +212,7 @@ class DailyProfiler:
                 except Exception:
                     metrics["db_size_mb"] = 0.0
 
-                # 7. Số lần HA events quan trọng trong ngày (homeassistant_start, component_loaded...)
+                # 7. How many important HA events fired today (homeassistant_start, component_loaded...)
                 try:
                     ha_events_row = session.execute(text(f"""
                         SELECT COUNT(*) FROM events
@@ -227,7 +227,7 @@ class DailyProfiler:
                 except Exception:
                     metrics["ha_lifecycle_events"] = 0
 
-                # 8. Timestamp anomaly hints từ events (để CorrelationLinker dùng)
+                # 8. Timestamp anomaly hints from events (for CorrelationLinker)
                 try:
                     event_rows = session.execute(text(f"""
                         SELECT event_type, time_fired_ts
@@ -258,7 +258,7 @@ class DailyProfiler:
 # ================================================================
 
 class SigmaDetector:
-    """So sánh giá trị hôm nay với rolling baseline, trả về danh sách anomaly."""
+    """Compare today's value against the rolling baseline; return the anomalies."""
 
     # (i18n label key, i18n unit key) — resolved by the panel's tVal()
     METRIC_LABELS = {
@@ -275,8 +275,8 @@ class SigmaDetector:
         history: list[dict],
     ) -> list[dict]:
         """
-        Trả về list anomaly dicts.
-        history: list các ngày ĐÃ QUA (không bao gồm hôm nay), mỗi item là metrics dict.
+        Return a list of anomaly dicts.
+        history: PAST days only (today excluded), one metrics dict per item.
         """
         anomalies = []
         n = len(history)
@@ -299,7 +299,7 @@ class SigmaDetector:
             if mean_val == 0 and today_val_f == 0:
                 continue
 
-            # Chọn thuật toán
+            # Pick the algorithm
             if n >= MIN_DAYS_FOR_SIGMA:
                 method = "σ"
                 try:
@@ -308,7 +308,7 @@ class SigmaDetector:
                     stdev = 0.0
 
                 if stdev < 0.001:
-                    # Không có variance — chỉ báo nếu today khác mean >50%
+                    # No variance to compare against - only report when today differs from the mean by more than 50%
                     if mean_val > 0 and abs(today_val_f - mean_val) / mean_val > 0.5:
                         severity = "warning"
                         pct_change = round((today_val_f - mean_val) / mean_val * 100)
@@ -370,9 +370,9 @@ class SigmaDetector:
 # ================================================================
 
 class CorrelationLinker:
-    """Khớp anomaly metrics với HA system events để giải thích nguyên nhân."""
+    """Match anomalous metrics against HA system events to explain the cause."""
 
-    # Khoảng thời gian xem xét liên quan: ±2 giờ
+    # Correlation lookaround window: ±2 hours
     WINDOW_SECONDS = 7200
 
     def link(
@@ -381,7 +381,7 @@ class CorrelationLinker:
         today_metrics: dict,
         history_days: list[dict],
     ) -> list[dict]:
-        """Thêm trường 'correlations' vào mỗi anomaly."""
+        """Add a 'correlations' field to each anomaly."""
         key_events = today_metrics.get("key_events", [])
         if not key_events:
             return anomalies
@@ -391,7 +391,7 @@ class CorrelationLinker:
             correlations = []
 
             if anomaly["metric"] in ("total_writes", "automation_triggers", "unavail_events"):
-                # Tìm event HA restart/reload gần trong ngày
+                # HA restart/reload events close to today
                 for ev in key_events:
                     ev_type = ev.get("type", "")
                     ts = ev.get("ts", 0)
@@ -408,7 +408,7 @@ class CorrelationLinker:
                             "params": {"time": ts_dt.strftime("%H:%M")},
                         })
 
-            # Kiểm tra top writer đặc biệt nổi trội
+            # Check whether one top writer stands out
             if anomaly["metric"] == "total_writes":
                 top = today_metrics.get("top_writers", [])
                 if top:
@@ -425,7 +425,7 @@ class CorrelationLinker:
                             },
                         })
 
-            # Kiểm tra unstable entities hôm nay so với lịch sử
+            # Compare today's unstable entities against the history
             if anomaly["metric"] == "unavail_events":
                 unstable = today_metrics.get("unstable_entities", [])
                 for ent in unstable[:3]:
@@ -442,13 +442,13 @@ class CorrelationLinker:
 
 
 # ================================================================
-# FINGERPRINT ANALYZER — entry point chính
+# FINGERPRINT ANALYZER — main entry point
 # ================================================================
 
 class FingerprintAnalyzer:
     """
-    Điểm vào chính cho tính năng Fingerprint.
-    Gọi từ service handle_analyze_fingerprint.
+    Main entry point for the Fingerprint feature.
+    Called from service handle_analyze_fingerprint.
     """
 
     def __init__(self, hass: HomeAssistant, store: "FingerprintStore"):
@@ -460,12 +460,12 @@ class FingerprintAnalyzer:
 
     async def async_analyze(self) -> dict:
         """
-        Chạy phân tích fingerprint cho hôm nay.
-        Trả về dict với anomalies, baseline_info, today_metrics.
+        Run the fingerprint analysis for today.
+        Returns a dict with anomalies, baseline_info and today_metrics.
         """
         await self.store.async_load()
 
-        # Thu thập metrics hôm nay (window = hôm nay từ 00:00 đến giờ hiện tại)
+        # Collect today's metrics (window = today, 00:00 to now)
         today_metrics = await self._profile_today()
 
         if today_metrics is None:
@@ -479,7 +479,7 @@ class FingerprintAnalyzer:
         all_days = self.store.get_all_days()
         today_str = dt_util.utcnow().date().isoformat()
 
-        # Lịch sử = tất cả ngày trừ hôm nay
+        # History = every day except today
         history = [
             v for k, v in sorted(all_days.items())
             if k != today_str
@@ -489,7 +489,7 @@ class FingerprintAnalyzer:
         anomalies = self._detector.detect(today_metrics, history)
         anomalies = self._linker.link(anomalies, today_metrics, history)
 
-        # Tạo sparkline data (30 ngày + hôm nay) cho panel
+        # Build the sparkline series (30 days + today) for the panel
         sparklines = self._build_sparklines(history, today_metrics)
 
         confidence = _confidence_level(baseline_days)
@@ -507,8 +507,8 @@ class FingerprintAnalyzer:
 
     async def async_collect_daily_baseline(self):
         """
-        Chạy lúc 00:05 mỗi ngày — chụp snapshot ngày hôm qua và lưu vào store.
-        Được lên lịch từ __init__.py qua async_track_time_interval.
+        Runs at 00:05 daily — snapshots yesterday and saves it to the store.
+        Scheduled from __init__.py via async_track_time_interval.
         """
         await self.store.async_load()
         metrics = await self._profiler.async_profile_yesterday()
@@ -547,7 +547,7 @@ class FingerprintAnalyzer:
 
             metrics: dict[str, Any] = {"date": today_str, "partial": True}
 
-            # Giờ đã qua trong ngày hôm nay — để normalize so sánh
+            # Hours elapsed today - so the comparison can be normalised
             hours_elapsed = now.hour + now.minute / 60.0
             metrics["hours_elapsed"] = round(hours_elapsed, 1)
 
@@ -556,7 +556,7 @@ class FingerprintAnalyzer:
                     SELECT COUNT(*) FROM states
                     WHERE last_updated_ts BETWEEN {ts_start} AND {ts_end}
                 """)).scalar()
-                # Extrapolate lên 24h để so sánh fair với baseline ngày đầy
+                # Extrapolate out to 24h so a partial today compares fairly with a full baseline day
                 raw_writes = int(row or 0)
                 if hours_elapsed > 0:
                     metrics["total_writes"] = round(raw_writes * 24 / hours_elapsed)
@@ -669,7 +669,7 @@ class FingerprintAnalyzer:
             return None
 
     def _build_sparklines(self, history: list[dict], today: dict) -> dict[str, list]:
-        """Tạo data array cho sparkline chart trên panel (tối đa 30 điểm + hôm nay)."""
+        """Build the data array for the panel sparkline (at most 30 points + today)."""
         keys = ["total_writes", "automation_triggers", "unavail_events"]
         result = {}
         for key in keys:
@@ -709,7 +709,7 @@ def _parse_date(date_str: str):
 
 
 def _confidence_level(days: int) -> int:
-    """Trả về % confidence dựa trên số ngày có baseline."""
+    """Return a % confidence based on how many baseline days exist."""
     if days == 0:
         return 0
     if days < 3:

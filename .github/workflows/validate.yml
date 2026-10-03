@@ -79,6 +79,15 @@ jobs:
       - name: Live-log regression checks
         run: python3 tools/test_live_log_findings.py
 
+      # v1.7.9 shipped an if/elif block flattened onto one 900-char line: it
+      # compiled, every gate passed, and the guard it contained never ran.
+      # These check branch structure and line shape, not just key presence.
+      - name: Dead-guard and flattened-line checks
+        run: python3 tools/test_dead_guard.py
+
+      - name: Dead-guard checks can still fail
+        run: python3 tools/counterproof_dead_guard.py
+
   # ── HACS Validation ──────────────────────────────────────────────────────────
   hacs-validate:
     name: HACS Validation

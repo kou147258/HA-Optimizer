@@ -173,7 +173,7 @@ async def _verified_restore(engine, hass: HomeAssistant, entity_id: str) -> dict
         if not await _entity_is_back(hass, entity_id, timeout=3.0 if reloaded else 0.0):
             # Either branch can be wrong here, not just the "re-enabled" one.
             # Checking only when re_enabled was true left a hole a user walked
-            # straight into: the second press on 恢复 took the
+            # straight into: the second press on Restore took the
             # "already enabled, nothing to do" path, which never looked at the
             # state machine, reported success, and dropped the trash record -
             # so the entity looked deleted for good. A confirmed success must
@@ -1215,7 +1215,7 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
 # ================================================================
 
 def _schedule_daily_baseline(hass: HomeAssistant, entry: ConfigEntry):
-    """Lên lịch thu thập baseline fingerprint mỗi ngày lúc 00:05."""
+    """Schedule the daily fingerprint baseline collection for 00:05."""
     from homeassistant.helpers.event import async_track_time_change
 
     async def _collect_cb(now):

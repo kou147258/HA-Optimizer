@@ -2944,6 +2944,23 @@ function renderDashboardResults(d, ts) {
     </div>`;
   }
 
+  // ── A check that could not run ──
+  // The backend sets this when the Lovelace resource list could not be read.
+  // Nothing was judged in that case, and an empty "custom cards" section
+  // below would otherwise read as "checked, all fine" — which is the opposite
+  // of what happened. Say what was skipped.
+  if (d.custom_cards_unchecked) {
+    html += `<div style="display:flex; align-items:flex-start; gap:10px; padding:10px 12px;
+        margin-bottom:20px; border-radius:6px; background:${sevBg('warning')};
+        border:1px solid ${sevBorder('warning')}">
+      <span>${sevIcon('warning')}</span>
+      <div style="flex:1">
+        <div style="font-weight:600; font-size:0.88rem">${t('dashCustomCardsUnchecked')}</div>
+        <div style="font-size:0.8rem; color:var(--text-muted); margin-top:3px">${d.custom_cards_unchecked}</div>
+      </div>
+    </div>`;
+  }
+
   // ── Dashboard list table ──
   html += `<div class="stat-card" style="text-align:left; padding:16px; margin-bottom:20px">
     <h3 style="margin-bottom:12px; font-size:1rem">📊 ${t('dashLblDashboards')}</h3>
@@ -3065,7 +3082,7 @@ function renderDashboardResults(d, ts) {
     </div>`;
   }
 
-  // ── Custom card chưa cài ──
+  // ── Custom card not installed ──
   if (d.unconfigured_custom_cards?.length > 0) {
     html += _dashSection('🔌 ' + t('dashLblCustomCards'), d.unconfigured_custom_cards.map(c => ({
       left: `<span class="reason-tag" style="background:rgba(244,67,54,0.1); color:var(--danger); border:1px solid rgba(244,67,54,0.3)">${c.type}</span>`,
@@ -3431,10 +3448,10 @@ function renderHealthResults(d, ts) {
          padding:12px 16px; margin-bottom:20px; font-size:0.78rem; color:var(--text-muted)">
       <div style="font-weight:700; color:var(--text); margin-bottom:8px">${t('healthLblCriteria')}</div>
       <div style="display:flex; flex-wrap:wrap; gap:10px">
-        <span>🔌 ${t('healthBdConnectivity')} <strong style="color:var(--danger)">-35đ</strong></span>
-        <span>🔴 ${t('healthBdOffline')} <strong style="color:var(--danger)">-25đ</strong></span>
-        <span>⚙️ ${t('healthConfigEntryErr')} <strong style="color:var(--danger)">-15đ</strong></span>
-        <span>⚡ ${t('healthBdSpike')} <strong style="color:var(--danger)">-10đ</strong></span>
+        <span>🔌 ${t('healthBdConnectivity')} <strong style="color:var(--danger)">${t('healthBdPenalty', {n: 35})}</strong></span>
+        <span>🔴 ${t('healthBdOffline')} <strong style="color:var(--danger)">${t('healthBdPenalty', {n: 25})}</strong></span>
+        <span>⚙️ ${t('healthConfigEntryErr')} <strong style="color:var(--danger)">${t('healthBdPenalty', {n: 15})}</strong></span>
+        <span>⚡ ${t('healthBdSpike')} <strong style="color:var(--danger)">${t('healthBdPenalty', {n: 10})}</strong></span>
       </div>
     </div>`;
 
@@ -4151,6 +4168,7 @@ const I18N = {
     dashLblUnavailEntitiesDesc: 'Exists but currently reporting unavailable/unknown — cards will show "Unavailable".',
     dashLblDupEntities: 'Duplicate entities',
     dashLblCustomCards: 'Custom cards not installed',
+    dashCustomCardsUnchecked: 'Custom cards were not checked',
     dashLblTemplateCards: 'Cards with Jinja2 templates',
     dashLblComplexViews: 'Complex views',
     dashLblComplexViewsDesc: 'High complexity → many entity subscriptions + heavy DOM → slow render on mobile.',
@@ -4388,6 +4406,7 @@ const I18N = {
     healthMoreDevices: 'and {n} more devices',
     healthConfigEntry: 'Config entry',
     healthConfigEntryErr: 'Config entry errors',
+    healthBdPenalty: '-{n} pts',
     healthConfigFailed: '{failed} failed, {retrying} retrying',
     healthBdConnectivity: 'Reconnects (7 days)',
     healthBdConnectivityDetail: '{n}× / {m} entities',
@@ -4618,6 +4637,7 @@ const I18N = {
     dashLblUnavailEntitiesDesc: '实体存在但当前报告为不可用/未知 —— 卡片会显示"不可用"。',
     dashLblDupEntities: '重复实体',
     dashLblCustomCards: '未安装的自定义卡片',
+    dashCustomCardsUnchecked: '自定义卡片未做检查',
     dashLblTemplateCards: '含 Jinja2 模板的卡片',
     dashLblComplexViews: '复杂视图',
     dashLblComplexViewsDesc: '复杂度高 → 大量实体订阅 + 沉重 DOM → 手机上渲染很慢。',
@@ -4859,6 +4879,7 @@ const I18N = {
     healthMoreDevices: '和另外 {n} 个设备',
     healthConfigEntry: '配置项',
     healthConfigEntryErr: '配置项出错',
+    healthBdPenalty: '-{n} 分',
     healthConfigFailed: '{failed} 个失败, {retrying} 个重试中',
     healthBdConnectivity: '7 天掉线',
     healthBdConnectivityDetail: '{n} 次 / {m} 个实体',

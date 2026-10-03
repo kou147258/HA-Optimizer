@@ -846,24 +846,24 @@ class RecorderAnalyzer:
 
 class DashboardAnalyzer:
     """
-    Phân tích toàn diện Lovelace dashboards từ .storage/lovelace*.
+    Comprehensive analysis of Lovelace dashboards, read from .storage/lovelace*.
 
-    Phát hiện:
+    Detects:
       1.  Heavy cards (expanded list + severity scoring)
-      2.  Views quá nhiều card (>30 gây lag khi load)
-      3.  Entity missing — không tồn tại trong HA registry
-      4.  Entity unavailable/unknown — tồn tại nhưng đang lỗi
-      5.  Duplicate entity — cùng entity xuất hiện >5 lần
-      6.  history-graph / statistics-graph với nhiều entity (>5)
-      7.  Custom card chưa cài — type bắt đầu custom: nhưng không
-          có trong frontend resource list
-      8.  Template nặng — card có Jinja2 template trong fields quan trọng
-      9.  WebSocket push pressure — entity trong dashboard update bao
-          nhiêu lần/ngày → đo gánh nặng thực tế lên browser
-      10. View complexity score — nesting depth, số entity, số template,
-          số DB query mỗi view; không phụ thuộc tên card
-      11. Recorder cross-reference — entity trong dashboard update nhiều
-          nhưng ít distinct states → lãng phí DB + bandwidth
+      2.  Views with too many cards (>30 causes lag on load)
+      3.  Missing entity — not present in the HA registry
+      4.  Entity unavailable/unknown — present but in an error state
+      5.  Duplicate entity — the same entity appearing >5 times
+      6.  history-graph / statistics-graph with many entities (>5)
+      7.  Custom card not installed — a type starting with custom: that is
+          not in the frontend resource list
+      8.  Heavy template — card with a Jinja2 template in an important field
+      9.  WebSocket push pressure — entities in the dashboard updating many
+          times/day → measures the real load put on the browser
+      10. View complexity score — nesting depth, entity count, template count,
+          DB query count per view; independent of card names
+      11. Recorder cross-reference — entities in the dashboard that update a
+          lot but have few distinct states → wasted DB + bandwidth
     """
 
     # --- Heavy card definitions ---
@@ -891,16 +891,16 @@ class DashboardAnalyzer:
         "todo":                        ("info",     "card_todo"),
     }
 
-    # Ngưỡng
+    # Thresholds
     VIEW_CARD_LIMIT         = 30
     VIEW_CARD_CRITICAL      = 60
     DUPLICATE_THRESHOLD     = 5
     GRAPH_ENTITY_WARNING    = 5
     GRAPH_ENTITY_CRITICAL   = 10
-    # WebSocket pressure: entity update > N lần/ngày trong dashboard = cảnh báo
+    # WebSocket pressure: an entity updated more than N times today in a dashboard
     WS_PUSH_WARNING         = 200    # times/day
     WS_PUSH_CRITICAL        = 500
-    # Cross-ref: entity trong dash update nhiều nhưng distinct states thấp
+    # Cross-reference: entity updated often in a dashboard but with few distinct states
     XREF_WRITES_WARNING     = 300    # writes/day
     XREF_WASTE_RATIO        = 10.0   # writes / distinct_states
     # Complexity thresholds per view
@@ -1058,10 +1058,22 @@ class DashboardAnalyzer:
                                     })
                             result["heavy_cards"].append(entry)
 
-                        # 2. Custom card chưa cài
+                        # 2. Custom card not installed
                         if card_type.startswith("custom:"):
                             view_custom_count += 1
-                            if not custom_cards_known:                                # An unreadable resource file is not evidence that no custom cards                                # are registered. The old code produced an empty set on failure and                                # this branch then listed every custom card on the dashboard as                                # unconfigured - accusing a working setup on the strength of a file                                # we could not open. Not knowing is not the same as not existing.                                result["custom_cards_unchecked"] = (                                    "The custom-card resource list could not be read, so no card "                                    "was judged here. Check Lovelace resources by hand."                                )                            elif card_type not in registered_custom_cards:
+                            if not custom_cards_known:
+                                # An unreadable resource file is not evidence that
+                                # no custom cards are registered. The old code
+                                # produced an empty set on failure and this branch
+                                # then listed every custom card on the dashboard as
+                                # unconfigured - accusing a working setup on the
+                                # strength of a file we could not open. Not knowing
+                                # is not the same as not existing.
+                                result["custom_cards_unchecked"] = (
+                                    "The custom-card resource list could not be read, so no card "
+                                    "was judged here. Check Lovelace resources by hand."
+                                )
+                            elif card_type not in registered_custom_cards:
                                 result["unconfigured_custom_cards"].append({
                                     "dashboard": dash_name,
                                     "view": view_title,
@@ -1159,7 +1171,7 @@ class DashboardAnalyzer:
             )[:30]
 
             # ── NEW #1 & #3: WebSocket pressure + Recorder cross-ref ──
-            # Cả hai cần DB query → chỉ chạy nếu recorder available
+            # Both need a DB query, so only run this when the recorder is available
             try:
                 ws_pressure, recorder_xref = self._analyze_recorder_crossref(
                     all_entity_refs_set, per_view_entity_sets
@@ -1188,9 +1200,9 @@ class DashboardAnalyzer:
         per_view_entity_sets: list[tuple[str, str, set[str]]],
     ) -> tuple[list[dict], list[dict]]:
         """
-        Query recorder để đo:
-          1. writes/ngày và distinct_states cho mỗi entity trong dashboard
-          2. Kết hợp → WebSocket push pressure + waste cross-ref
+        Query recorder to measure:
+          1. writes/day and distinct_states for each entity in the dashboard
+          2. Combine → WebSocket push pressure + waste cross-reference
 
         Returns (ws_pressure_list, crossref_list)
         """
@@ -1211,7 +1223,7 @@ class DashboardAnalyzer:
         if not dashboard_entities:
             return [], []
 
-        # Build SQL IN clause — cap at 200 entities để tránh query quá dài
+        # Build SQL IN clause — cap at 200 entities to keep the query short
         sample = list(dashboard_entities)[:200]
         placeholders = ", ".join(f"'{e}'" for e in sample)
 
@@ -1219,7 +1231,7 @@ class DashboardAnalyzer:
         recorder_xref:  list[dict] = []
 
         with instance.get_session() as session:
-            # Writes/ngày (avg over 7d) + distinct states (over 24h)
+            # Writes per day (avg over 7d) + distinct states (over 24h)
             rows = session.execute(text(f"""
                 SELECT
                     entity_id,
@@ -1252,7 +1264,7 @@ class DashboardAnalyzer:
             views_containing = entity_to_views.get(eid, [])
 
             # ── WebSocket pressure ──
-            # Mỗi write → HA gửi state_changed event qua WebSocket đến browser
+            # Every write → HA pushes a state_changed event over WebSocket to the browser
             if wpd >= self.WS_PUSH_WARNING:
                 sev = "critical" if wpd >= self.WS_PUSH_CRITICAL else "warning"
                 friendly = ""
@@ -1282,7 +1294,7 @@ class DashboardAnalyzer:
                 })
 
             # ── Recorder cross-reference ──
-            # Entity update nhiều nhưng ít distinct → ghi DB + push WebSocket lãng phí
+            # Many updates with few distinct values means wasted database writes and WebSocket pushes
             if wpd >= self.XREF_WRITES_WARNING and dist > 0:
                 waste_ratio = wpd / max(dist, 1)
                 if waste_ratio >= self.XREF_WASTE_RATIO:
@@ -1338,10 +1350,11 @@ class DashboardAnalyzer:
         custom_count:    int,
     ) -> dict:
         """
-        Tính điểm phức tạp của một view.
-        Điểm càng cao → view càng tốn tài nguyên browser khi render/update.
+        Compute a complexity score for one view.
+        The higher the score → the more browser resources the view costs on
+        render/update.
 
-        Công thức (có trọng số thực nghiệm):
+        Formula (empirically weighted):
           score = cards*1 + depth*8 + entities*2 + templates*5 + db_queries*10 + customs*3
         """
         score = (
@@ -1383,7 +1396,7 @@ class DashboardAnalyzer:
         }
 
     def _measure_depth(self, card: dict, current: int = 1) -> int:
-        """Đo độ sâu lồng nhau tối đa của cây card."""
+        """Measure the maximum nesting depth of a card tree."""
         if not isinstance(card, dict):
             return current
         max_d = current
