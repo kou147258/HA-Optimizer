@@ -44,6 +44,36 @@ def check(name: str, cond: bool, detail: str = "") -> None:
         FAILURES.append(name)
 
 
+# ── the tab bar must have one source of truth for its labels ───────────────
+# The language switcher used to keep its OWN hardcoded array of tab keys and
+# write them by index. Adding the tenth tab updated two other arrays and not
+# that one, so from 1.7.11 the Add-ons label landed on the Automations tab and
+# Trash on Add-ons, and the inner <span data-i18n> of every rewritten tab was
+# destroyed. Every static check read the file and found it correct, because the
+# damage happens at runtime. Adding a tab is now one edit: the markup.
+_panel_src = (COMPONENT / "panel.html").read_text(encoding="utf-8")
+_bar_start = _panel_src.find('<div class="tabs">')
+# Take a generous window rather than matching to the first </div>, which is the
+# first tab's own closing tag.
+_b = _panel_src[_bar_start:_bar_start + 4000] if _bar_start >= 0 else ""
+_names = re.findall(r'data-tab="(\w+)"', _b)
+_keys = re.findall(r'data-i18n="(tab\w+)"', _b)
+check("every tab declares its own name and a key",
+      len(_names) == len(_keys) == 10, f"{len(_names)} tabs, {len(_keys)} keys")
+check("the tab keys are unique", len(set(_keys)) == len(_keys), str(_keys))
+check("no tab hides its key in an inner span", "<span data-i18n=" not in _b,
+      "a switcher writing el.textContent destroys the span, and the generic "
+      "applier then has nothing left to translate")
+_orphan = [k for k in _keys if f"{k}:" not in _panel_src]
+check("every tab key is defined in the dictionary", not _orphan, str(_orphan))
+check("no parallel array of tab keys is kept anywhere",
+      "const tabKeys" not in _panel_src and "['tabScan'" not in _panel_src,
+      "a second list of the same facts is exactly what drifted out of step")
+check("switchTab reads the tab name from the element",
+      "el.getAttribute('data-tab') === name" in _panel_src,
+      "toggling .active by index shifts every highlight when a tab is inserted")
+
+
 # ── stub the parts of Home Assistant __init__.py touches ───────────────────
 def _stub() -> None:
     ha = types.ModuleType("homeassistant")

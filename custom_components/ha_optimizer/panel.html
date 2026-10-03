@@ -1176,16 +1176,16 @@
   </style>
 
   <div class="tabs">
-    <div class="tab active" onclick="switchTab('scan')"><span data-i18n="tabScan">📋 Overview Scan</span></div>
-    <div class="tab" onclick="switchTab('recorder')"><span data-i18n="tabRecorder">📊 Recorder</span></div>
-    <div class="tab" onclick="switchTab('dashboard')"><span data-i18n="tabDashboard">🖥️ Dashboard</span></div>
-    <div class="tab" onclick="switchTab('storms')"><span data-i18n="tabStorms">⚡ State Storm</span></div>
-    <div class="tab" onclick="switchTab('deadcode')"><span data-i18n="tabDeadcode">🔍 Dead Code</span></div>
-    <div class="tab" onclick="switchTab('health')"><span data-i18n="tabHealth">💚 Health</span></div>
-    <div class="tab" onclick="switchTab('fingerprint')"><span data-i18n="tabFingerprint">🫆 Fingerprint</span></div>
-    <div class="tab" onclick="switchTab('autos')"><span data-i18n="tabAutos">🤖 Automations</span></div>
-    <div class="tab" onclick="switchTab('addon')"><span data-i18n="tabAddon">🧩 Add-ons</span></div>
-    <div class="tab" onclick="switchTab('soft')"><span data-i18n="tabSoft">🗑️ Trash</span></div>
+    <div class="tab active" data-tab="scan" data-i18n="tabScan" onclick="switchTab('scan')">📋 Overview Scan</div>
+    <div class="tab" data-tab="recorder" data-i18n="tabRecorder" onclick="switchTab('recorder')">📊 Recorder</div>
+    <div class="tab" data-tab="dashboard" data-i18n="tabDashboard" onclick="switchTab('dashboard')">🖥️ Dashboard</div>
+    <div class="tab" data-tab="storms" data-i18n="tabStorms" onclick="switchTab('storms')">⚡ State Storm</div>
+    <div class="tab" data-tab="deadcode" data-i18n="tabDeadcode" onclick="switchTab('deadcode')">🔍 Dead Code</div>
+    <div class="tab" data-tab="health" data-i18n="tabHealth" onclick="switchTab('health')">💚 Health</div>
+    <div class="tab" data-tab="fingerprint" data-i18n="tabFingerprint" onclick="switchTab('fingerprint')">🫆 Fingerprint</div>
+    <div class="tab" data-tab="autos" data-i18n="tabAutos" onclick="switchTab('autos')">🤖 Automations</div>
+    <div class="tab" data-tab="addon" data-i18n="tabAddon" onclick="switchTab('addon')">🧩 Add-ons</div>
+    <div class="tab" data-tab="soft" data-i18n="tabSoft" onclick="switchTab('soft')">🗑️ Trash</div>
   </div>
 
   <!-- SCAN TAB -->
@@ -2738,13 +2738,17 @@ function switchTab(name) {
   if (name === 'addon' && !_addonRealtimeOn) {
     _addonRealtimeOn = true; // re-arm before loadAddonTab calls _addonRealtimeTick
   }
+  // Which container to show. The tab label and the active highlight are
+  // not in here - they come from the elements themselves.
   ['scan','recorder','dashboard','storms','deadcode','health','fingerprint','autos','addon','soft'].forEach(t => {
     const el = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
     if (el) el.style.display = t === name ? 'block' : 'none';
   });
-  document.querySelectorAll('.tab').forEach((t, i) => {
-    const names = ['scan','recorder','dashboard','storms','deadcode','health','fingerprint','autos','addon','soft'];
-    t.classList.toggle('active', names[i] === name);
+  // From data-tab, so the highlight cannot drift out of step with the markup
+  // either. Toggling by index meant a tab inserted anywhere shifted every
+  // highlight after it.
+  document.querySelectorAll('.tab[data-tab]').forEach(el => {
+    el.classList.toggle('active', el.getAttribute('data-tab') === name);
   });
   if (name === 'autos') loadAutomationRuns();
   if (name === 'soft') loadSoftDeleted();
@@ -5471,9 +5475,13 @@ function _applyTranslations() {
   `;
 
   // ── Tabs
-  const tabEls = document.querySelectorAll('.tab');
-  const tabKeys = ['tabScan','tabRecorder','tabDashboard','tabStorms','tabDeadcode','tabHealth','tabFingerprint','tabAddon','tabSoft'];
-  tabEls.forEach((el, i) => { if (tabKeys[i]) el.textContent = t(tabKeys[i]); });
+  // The key comes from the element, not from a list kept in step with the
+  // markup by hand. A tenth tab was once added and this list was not updated,
+  // so index 8 showed the Add-ons label and the inner span of every tab this
+  // loop rewrote was destroyed. `data-i18n` is all the label needs.
+  document.querySelectorAll('.tab[data-i18n]').forEach(el => {
+    el.textContent = t(el.getAttribute('data-i18n'));
+  });
 
   // ── Main action buttons (preserve disabled state)
   const _btn = (id, key) => {
