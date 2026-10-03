@@ -2627,10 +2627,11 @@ function updateSoftDeleteCount(delta) {
 // Reads Home Assistant's own trace component. A failing automation emits no
 // event, so there is nothing to subscribe to - this is the only structured
 // source of "it ran and it broke".
-async function loadAutomationRuns() {
+async function loadAutomationRuns(force) {
   const host = document.getElementById('tabAutos');
   if (!host) return;
-  if (host.dataset.loaded) return;
+  if (host.dataset.loaded && !force) return;
+  delete host.dataset.loaded;
   host.innerHTML = '<div style="text-align:center; padding:40px; color:var(--text-muted)">'
     + escapeHtml(t('loading')) + '</div>';
   try {
@@ -2643,6 +2644,12 @@ async function loadAutomationRuns() {
     host.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><h3>'
       + escapeHtml(t('errTitle')) + '</h3><p>' + escapeHtml(e.message) + '</p></div>';
   }
+}
+
+/** Re-read the run data. The first read can land before the trace component
+ *  has anything in it, and a page that only loads once cannot notice. */
+function refreshAutomationRuns() {
+  return loadAutomationRuns(true);
 }
 
 const AUTO_OUTCOME = {
@@ -2659,9 +2666,20 @@ function renderAutomationRuns(host, d) {
   const cov = d.coverage || {};
   let html = '';
   if (!cov.traces_available) {
-    html += `<div style="display:flex; gap:10px; padding:10px 12px; margin-bottom:20px;
-        border-radius:6px; background:rgba(255,152,0,0.1); border:1px solid rgba(255,152,0,0.35)">
-      <span>⚠️</span><div style="font-size:0.85rem">${escapeHtml(cov.note || t('autoNoTraces'))}</div></div>`;
+    // One banner, carrying the reason. It used to be printed twice - once here
+    // and again as the empty state below - on a screen with nothing else on it.
+    html += `<div style="display:flex; gap:10px; align-items:flex-start; padding:12px 14px;
+        margin-bottom:20px; border-radius:8px; background:rgba(255,152,0,0.1);
+        border:1px solid rgba(255,152,0,0.35)">
+      <span>⚠️</span>
+      <div style="flex:1; font-size:0.85rem">
+        <div>${escapeHtml(cov.note || t('autoNoTraces'))}</div>
+        <div style="margin-top:8px">
+          <button class="btn btn-ghost btn-xs" onclick="refreshAutomationRuns()">`
+            + escapeHtml(t('btnReload')) + `</button>
+        </div>
+      </div>
+    </div>`;
   } else {
     const s = d.summary || {};
     const rate = s.success_rate === null || s.success_rate === undefined ? '—' : s.success_rate + '%';
@@ -2681,12 +2699,20 @@ function renderAutomationRuns(host, d) {
 
   const rows = d.automations || [];
   if (!rows.length) {
-    html += `<div class="empty-state"><div class="icon">🤖</div><h3>${escapeHtml(t('autoEmpty'))}</h3>
-      <p>${escapeHtml(cov.traces_available ? t('autoEmptyDesc') : t('autoNoTraces'))}</p></div>`;
+    // The reason, when traces were readable but held nothing, is a different
+    // one - and repeating the coverage banner here is what made this read as
+    // two separate problems.
+    if (cov.traces_available) {
+      html += `<div class="empty-state"><div class="icon">🤖</div><h3>${escapeHtml(t('autoEmpty'))}</h3>
+        <p>${escapeHtml(t('autoEmptyDesc'))}</p></div>`;
+    }
     host.innerHTML = html;
     return;
   }
 
+  html += `<div style="display:flex; justify-content:flex-end; margin-bottom:12px">
+    <button class="btn btn-ghost btn-xs" onclick="refreshAutomationRuns()">`
+      + escapeHtml(t('btnReload')) + `</button></div>`;
   html += '<div style="display:flex; flex-direction:column; gap:10px">';
   for (const a of rows) {
     const o = AUTO_OUTCOME[a.last_outcome] || AUTO_OUTCOME.unknown;

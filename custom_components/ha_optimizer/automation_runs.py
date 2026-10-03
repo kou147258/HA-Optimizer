@@ -52,16 +52,32 @@ OUTCOME_RUNNING = "running"
 OUTCOME_UNKNOWN = "unknown"
 
 
-def _err_trace_component() -> tuple[Any, str | None]:
-    """Return (DATA_TRACE, error). The key is a HassKey, so importing it does
-    not require the component to be set up - but the import itself fails if the
-    component does not exist in this HA version, which is a real answer."""
+async def _ensure_trace_component(hass) -> tuple[Any, str]:
+    """Make sure the trace component is set up, and return (DATA_TRACE, state).
+
+    The storage this module reads is created by the trace component's
+    async_setup, which runs only when something asks for tracing. Nothing did,
+    so `hass.data[DATA_TRACE]` was absent and the panel reported "this instance
+    has no trace data" about automations that had run a minute earlier. Loading
+    the component first is what Home Assistant's own trace UI does.
+
+    Returns ("unavailable", reason) when the component does not exist in this
+    version, ("empty", "") when it is loaded but holds nothing, and
+    (DATA_TRACE, "ok") when it is loaded. The three are different facts.
+    """
     try:
         from homeassistant.components.trace.const import DATA_TRACE  # noqa: PLC0415
-
-        return DATA_TRACE, None
     except Exception as exc:  # noqa: BLE001
-        return None, f"the trace component is not available in this Home Assistant version ({exc})"
+        return None, "unavailable"
+    try:
+        from homeassistant.setup import async_setup_component  # noqa: PLC0415
+
+        await async_setup_component(hass, "trace", {})
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.debug("Could not set up the trace component: %s", exc)
+    if (hass.data or {}).get(DATA_TRACE) is None:
+        return DATA_TRACE, "empty"
+    return DATA_TRACE, "ok"
 
 
 # ── failure diagnosis ──────────────────────────────────────────────────────
@@ -206,19 +222,31 @@ class AutomationRunAnalyzer:
             "coverage": {"traces_available": False, "note": ""},
         }
 
-        data_key, err = _err_trace_component()
-        if data_key is None:
-            result["coverage"] = {"traces_available": False, "note": err}
-            return result
-        buckets = (self.hass.data or {}).get(data_key)
-        if buckets is None:
+        data_key, state = await _ensure_trace_component(self.hass)
+        if state == "unavailable":
             result["coverage"] = {
                 "traces_available": False,
-                "note": "the trace component is installed but has no data yet; "
-                        "traces are only stored once automations have run",
+                "state": "unavailable",
+                "note": "This Home Assistant version has no trace component, so "
+                        "run outcomes cannot be read at all.",
             }
             return result
-        result["coverage"]["traces_available"] = True
+        buckets = (self.hass.data or {}).get(data_key) or {}
+        if not buckets:
+            result["coverage"] = {
+                "traces_available": False,
+                "state": "empty",
+                "note": "The trace component is loaded and has recorded no runs. "
+                        "Traces appear once automations have run, and an "
+                        "automation created in YAML needs an id for its traces "
+                        "to be stored at all.",
+            }
+            return result
+        result["coverage"] = {
+            "traces_available": True,
+            "state": "ok",
+            "note": "",
+        }
 
         names = self._automation_names()
         rows: list[dict[str, Any]] = []
