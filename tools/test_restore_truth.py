@@ -73,9 +73,12 @@ check("the snapshot is copied, not appended by reference",
       "appending the snapshot object itself would let a later scan mutate the "
       "stored trash record")
 check("`disabled` is re-read from the entity registry before the row is written",
-      "ent_reg.async_get(eid)" in fn and 'entry["disabled"]' in fn,
+      "ent_reg.async_get(target)" in fn
+      and 'entry["entity_id"] = target' in fn
+      and 'entry["disabled"]' in fn,
       "replaying the snapshot's disabled flag is what made a successful "
-      "restore look like a failed one")
+      "restore look like a failed one; and the registry must be asked about "
+      "the same id the row is written under, or the two can diverge again")
 check("the stale `reason_auto_disabled` is dropped once the entity is enabled",
       '"reason_auto_disabled" in reasons' in fn and 'r != "reason_auto_disabled"' in fn,
       "otherwise the row keeps flagging a reason that was just fixed")

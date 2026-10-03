@@ -61,8 +61,10 @@ MUTATIONS = [
     (
         "the trash record is dropped regardless of the outcome",
         "__init__.py",
-        '        if result.get("success"):\n            # Put the entity back in the scan list BEFORE dropping the trash',
-        '        if True:\n            # Put the entity back in the scan list BEFORE dropping the trash',
+        '        if result.get("success"):\n'
+        '            # The trash is keyed by the id the entity had when it was disabled',
+        '        if True:\n'
+        '            # The trash is keyed by the id the entity had when it was disabled',
     ),
 ]
 

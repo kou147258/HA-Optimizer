@@ -88,6 +88,15 @@ jobs:
       - name: Dead-guard checks can still fail
         run: python3 tools/counterproof_dead_guard.py
 
+      # HA 2026.8 lets the user rename an entity_id, and the trash is keyed by
+      # entity_id. These run the real store against a fake registry so the
+      # rename is exercised, not string-matched.
+      - name: Registry-identity behaviour tests
+        run: python3 tools/test_rename_identity.py
+
+      - name: Registry-identity checks can still fail
+        run: python3 tools/counterproof_rename_identity.py
+
   # ── HACS Validation ──────────────────────────────────────────────────────────
   hacs-validate:
     name: HACS Validation

@@ -71,8 +71,14 @@ def _stub() -> None:
     entity_registry = types.ModuleType("homeassistant.helpers.entity_registry")
 
     class _RegistryEntry:
-        def __init__(self, disabled=False):
+        # Models the real RegistryEntry, including the identity triple the store
+        # captures when it writes a trash record: an incomplete fake here made
+        # store.py raise AttributeError instead of testing the behaviour.
+        def __init__(self, disabled=False, unique_id=None, platform=None, domain=None):
             self.disabled = disabled
+            self.unique_id = unique_id
+            self.platform = platform
+            self.domain = domain
 
     class _EntReg:
         def __init__(self, entities=None):
@@ -80,6 +86,12 @@ def _stub() -> None:
 
         def async_get(self, entity_id):
             return self._entities.get(entity_id)
+
+        def async_get_entity_id(self, domain, platform, unique_id):
+            for entity_id, e in self._entities.items():
+                if (e.domain, e.platform, e.unique_id) == (domain, platform, unique_id):
+                    return entity_id
+            return None
 
     # Tests set this to control what the registry claims.
     entity_registry._current = _EntReg()

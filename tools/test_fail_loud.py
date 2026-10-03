@@ -70,27 +70,32 @@ init = read("__init__.py")
 scanner = read("scanner.py")
 panel = read("panel.html")
 
-# ═══ 1. the impact map says what it is ═════════════════════════════════════
-print("\nthe impact dialog must not look more complete than it is")
-dep = body(engine, "    async def async_get_dependency_map(self, entity_id: str)")
-check("the function was found", bool(dep))
-check("it declares itself incomplete", '"complete": False' in dep)
-check("it names the method, so the panel can say so",
-      '"method":' in dep and "heuristic" in dep)
-check("it still says dashboards are not scanned",
-      "Cannot be scanned at runtime" in dep)
-check("the dead automation.config call is gone",
-      '"automation",' not in code_only(dep) or '"config"' not in code_only(dep),
-      "a call whose result is discarded cannot fail in a way anyone can see")
-check("no exception is swallowed in it",
-      not re.search(r"except Exception:\s*\n\s*pass", dep))
-check("the match is token-aware, not a bare substring",
-      "strip(\"\\\"'[]() ,\")" in dep or "strip(" in dep,
-      "a bare substring test makes sensor.a match sensor.ab, and the dialog "
-      "then lists automations that have nothing to do with the entity")
-check("the panel renders the new fields",
-      "depSection" in panel or "impact" in panel.lower(),
-      "the backend is now honest; the dialog should show it")
+# ═══ 1. the impact list must not look more complete than it is ═════════════
+# This used to guard `async_get_dependency_map`, which had zero callers: no
+# service, no panel code, nothing. Its "I am a heuristic" fields were invisible
+# because nothing ever called the method, and the assertion meant to prove the
+# panel rendered them was `"depSection" in panel or "impact" in panel.lower()`
+# - satisfied by the unrelated "Impact Analysis" heading. A check whose name
+# says one thing and whose condition verifies something else is worse than no
+# check, because it reads as coverage.
+#
+# The path actually in use is `used_in`, produced by the scanner at scan time.
+# So that is what gets checked: the dialog states what it looked at, and an
+# empty result is not presented as "nothing depends on this".
+print("\nthe impact list must not look more complete than it is")
+check("the dead runtime dependency map is gone",
+      "async_get_dependency_map" not in engine,
+      "zero callers, and strictly weaker than the scanner's used_in")
+check("the panel's impact dialog says what it scanned",
+      "impactScanScope" in panel,
+      "used_in is computed by the scanner and has known blind spots")
+check("that caveat is a translation, not hardcoded English",
+      panel.count("impactScanScope:") >= 2,
+      "one language block is not a translation")
+check("an entity with no known references says so",
+      "impactNoRefs" in panel,
+      "an empty impact section reads as 'nothing depends on it', which is a "
+      "different and much stronger claim than 'none was found'")
 
 # ═══ 2. an unreadable resource list is not an empty one ════════════════════
 print("\nan unreadable file is not evidence of absence")
@@ -145,17 +150,49 @@ check("no blocking file or sleep call inside an async function",
 # The three remaining swallows are each a genuinely optional lookup: removing
 # the sidebar panel on unload, the recorder's database size, and a date parse.
 # What is banned is swallowing in a path that decides something.
-swallowed = []
+#
+# They are identified by the statement inside their try block, not by line
+# number. Keying on a line number meant that inserting anything above one of
+# them silently turned a known-benign entry into "a fourth swallow" - the check
+# fired on code nobody had touched, which is how a guard gets switched off.
+def _swallow_sites(src: str, name: str) -> list[tuple[str, str]]:
+    lines = src.split("\n")
+    found: list[tuple[str, str]] = []
+    for i, line in enumerate(lines):
+        if not re.match(r"\s*except Exception[^\n]*:\s*$", line):
+            continue
+        j = i + 1
+        while j < len(lines) and not lines[j].strip():
+            j += 1
+        if j >= len(lines) or lines[j].strip() not in ("pass", "return None"):
+            continue
+        opens = [k for k in range(i) if lines[k].strip() == "try:"]
+        # The signature is the statement the except protects, not the try's
+        # first line: with nested try blocks "the nearest preceding try:" names
+        # the wrong one.
+        sig = lines[i - 1].strip() if i else "?"
+        assert opens, f"{name}:{i + 1} swallows with no try above it"
+        found.append((f"{name}:{i + 1}", sig))
+    return found
+
+
+swallowed: list[str] = []
+signatures: dict[str, str] = {}
 for f in PYFILES:
-    s = read(f)
-    for m in re.finditer(r"except Exception[^\n]*:\s*\n\s*(pass|return None)", s):
-        swallowed.append(f"{f}:{s[:m.start()].count(chr(10)) + 1}")
-BENIGN = {"__init__.py:471", "scanner.py:798", "fingerprint.py:707"}
-unexpected = [x for x in swallowed if x not in BENIGN]
+    for site, sig in _swallow_sites(read(f), f):
+        swallowed.append(site)
+        signatures[site] = sig
+BENIGN_SIGS = {
+    "frontend.async_remove_panel(hass, PANEL_URL)",
+    'result["db_size_mb"] = round(size / 1024 / 1024, 1)',
+    "return datetime.fromisoformat(date_str).date()",
+}
+unexpected = [x for x in swallowed if signatures[x] not in BENIGN_SIGS]
 check("no bare swallow outside the three known-optional lookups",
       not unexpected, f"new: {unexpected}")
 check("those three are still the only ones, so a fourth is noticed",
-      set(swallowed) == BENIGN, f"now: {sorted(swallowed)}")
+      sorted(signatures.values()) == sorted(BENIGN_SIGS),
+      f"now: {sorted(signatures.items())}")
 
 scheduled = re.findall(r"async_track_time_interval\([^,]+,\s*(\w+),\s*timedelta\(([^)]*)\)", init)
 check("the scheduled jobs are still the two we know about",

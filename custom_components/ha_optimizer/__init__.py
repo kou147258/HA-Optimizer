@@ -140,7 +140,8 @@ def _async_clear_issue(hass: HomeAssistant, issue_id: str) -> None:
         _LOGGER.debug("Could not clear issue %s: %s", issue_id, exc)
 
 
-async def _verified_restore(engine, hass: HomeAssistant, entity_id: str) -> dict:
+async def _verified_restore(engine, hass: HomeAssistant, entity_id: str,
+                             store=None) -> dict:
     """Restore an entity and make sure the answer means something.
 
     `async_restore_entity` answers `success, re_enabled=False` for "there was
@@ -159,7 +160,44 @@ async def _verified_restore(engine, hass: HomeAssistant, entity_id: str) -> dict
     from the state machine until `automation.reload` was issued by hand. So a
     restore that claims to have re-enabled something is confirmed against the
     state machine before the trash record is dropped.
+
+    `store` is the trash, and passing it changes what a failure means. Since HA
+    2026.8 the user can rename an entity_id, so a trash record may name an id
+    that no longer exists while the entity itself is fine under a new one. Left
+    alone that is reported as "no longer in the registry - it was deleted, not
+    disabled", which is both wrong and unfalsifiable from the panel. So the
+    record is first resolved through the registry identity captured when the
+    entity was disabled: renamed means restore the new id, gone means say
+    precisely what is known instead of guessing.
     """
+    resolved: dict = {"entity_id": entity_id, "status": "ok", "renamed_from": None,
+                      "identity_known": False}
+    if store is not None:
+        resolved = await store.async_resolve_soft_deleted(entity_id)
+        target = resolved["entity_id"]
+        if resolved["status"] == "renamed":
+            _LOGGER.info(
+                "%s was renamed to %s while it sat in the trash; restoring the "
+                "entity under its current id", entity_id, target,
+            )
+            entity_id = target
+        elif resolved["status"] == "gone":
+            error = (
+                "renamed since it was disabled, and the registry identity stored "
+                "with it no longer matches any entity - find it in the entity "
+                "registry and restore it from there"
+                if resolved.get("identity_known")
+                else "no longer in the registry - it was deleted, not disabled"
+            )
+            _LOGGER.warning("Cannot restore %s: %s", entity_id, error)
+            return {
+                "success": False,
+                "re_enabled": False,
+                "entity_id": entity_id,
+                "error": error,
+                "orphaned": True,
+            }
+
     result = await engine.async_restore_entity(entity_id)
     if result.get("success"):
         from homeassistant.helpers import entity_registry as er
@@ -208,6 +246,12 @@ async def _verified_restore(engine, hass: HomeAssistant, entity_id: str) -> dict
                 "error": error,
             }
     result.setdefault("entity_id", entity_id)
+    # The trash is keyed by the id the entity had when it was disabled. Hand
+    # that back separately so the caller removes the right record, and say so
+    # when the entity has moved.
+    result["trash_key"] = resolved.get("renamed_from") or entity_id
+    if resolved.get("status") == "renamed":
+        result["renamed_from"] = resolved["renamed_from"]
     _async_clear_issue(hass, "restore_did_not_complete")
     return result
 
@@ -585,17 +629,25 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
         """Handle restore service call."""
         entity_id = call.data.get("entity_id")
         data = hass.data[DOMAIN][entry.entry_id]
-        result = await _verified_restore(data["engine"], hass, entity_id)
+        result = await _verified_restore(data["engine"], hass, entity_id,
+                                         store=data["store"])
         if result.get("success"):
+            # The trash is keyed by the id the entity had when it was disabled,
+            # and the scan row has to come back under the id it has now.
+            trash_key = result.get("trash_key") or entity_id
+            rename_map = {}
+            if result.get("renamed_from"):
+                rename_map[trash_key] = result["entity_id"]
             # Put the entity back in the scan list BEFORE dropping the trash
             # record - the snapshot it needs lives in that record. Without
             # this the entity came back to HA but stayed invisible here.
-            await data["store"].async_restore_scan_entries([entity_id])
-            await data["store"].async_remove_soft_deleted([entity_id])
+            await data["store"].async_restore_scan_entries([trash_key], rename_map)
+            await data["store"].async_remove_soft_deleted([trash_key])
         return {
             "success": result.get("success", False),
             "re_enabled": result.get("re_enabled", False),
-            "entity_id": entity_id,
+            "entity_id": result.get("entity_id", entity_id),
+            "renamed_from": result.get("renamed_from"),
             "error": result.get("error"),
         }
 
@@ -611,18 +663,22 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
         trash = await data["store"].async_get_soft_deleted()
         restored: list[str] = []
         failed: dict[str, str] = {}
+        renames: dict[str, str] = {}
         budget = _Cooperative()
 
         for eid in list(trash):
-            result = await _verified_restore(data["engine"], hass, eid)
+            result = await _verified_restore(data["engine"], hass, eid,
+                                             store=data["store"])
             if result.get("success"):
                 restored.append(eid)
+                if result.get("renamed_from"):
+                    renames[eid] = result["entity_id"]
             else:
                 failed[eid] = result.get("error") or "restore failed"
             await budget.tick()
 
         if restored:
-            await data["store"].async_restore_scan_entries(restored)
+            await data["store"].async_restore_scan_entries(restored, renames)
             await data["store"].async_remove_soft_deleted(restored)
 
         _LOGGER.info(
@@ -667,7 +723,25 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
         budget = _Cooperative()
 
         for eid in ids:
-            result = await data["engine"].async_hard_delete_soft_deleted([eid])
+            # A record whose entity was renamed still refers to a real entity,
+            # just not under the id we stored. Handing the old id to the engine
+            # would find nothing, report nothing removed, and leave a live
+            # entity in the trash "kept" for ever, with no explanation.
+            resolved = await data["store"].async_resolve_soft_deleted(eid)
+            target = resolved["entity_id"]
+            result = await data["engine"].async_hard_delete_soft_deleted([target])
+            if resolved["status"] == "renamed":
+                # Report under the id the user sees in the trash listing.
+                def _back(key: str) -> list:
+                    return [eid if i == target else i for i in result.get(key, [])]
+
+                result = {
+                    **result,
+                    "success": _back("success"),
+                    "soft_deleted": _back("soft_deleted"),
+                    "disabled_only": _back("disabled_only"),
+                    "renamed": {eid: target},
+                }
             if eid in set(result.get("success", [])) | set(result.get("soft_deleted", [])):
                 removed.append(eid)
             elif eid in set(result.get("disabled_only", [])):
@@ -728,13 +802,30 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
         It also has to agree with the expiry check itself, which removes an
         entry once `(now - disabled_at).days >= days` - i.e. after the full
         period has actually elapsed.
+
+        Each entry also gets a `status`, resolved against the live registry:
+        `ok`, `renamed` (the entity moved to a new entity_id since it was
+        disabled, and `current_entity_id` says where), or `gone` (no entity
+        matches any more). Without it a renamed record is indistinguishable from
+        a deleted one, and the panel's own Restore button says "not found".
         """
         data = hass.data[DOMAIN][entry.entry_id]
         scan = await data["store"].async_get_scan_results()
         soft = await data["store"].async_get_soft_deleted()
         days = entry.options.get(CONF_SOFT_DELETE_DAYS, DEFAULT_SOFT_DELETE_DAYS)
         now = dt_util.utcnow()
-        for meta in soft.values():
+        for eid, meta in list(soft.items()):
+            try:
+                resolved = await data["store"].async_resolve_soft_deleted(eid)
+            except Exception:  # noqa: BLE001 - the listing must still render
+                resolved = {"entity_id": eid, "status": "gone",
+                            "renamed_from": None, "identity_known": False}
+                _LOGGER.warning(
+                    "Could not resolve the registry identity of trash entry %s; "
+                    "reported as gone", eid, exc_info=True,
+                )
+            meta["status"] = resolved["status"]
+            meta["current_entity_id"] = resolved["entity_id"]
             try:
                 disabled_at = datetime.fromisoformat(meta["disabled_at"])
                 if disabled_at.tzinfo is None:

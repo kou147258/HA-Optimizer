@@ -2347,15 +2347,17 @@ function showPurgeModal(hardDelete) {
     return r && r.used_in && r.used_in.length > 0;
   });
 
+  depSection.style.display = 'block';
   if (withRefs.length > 0) {
-    depSection.style.display = 'block';
     depList.innerHTML = withRefs.map(id => {
       const r = allResults.find(x => x.entity_id === id);
       return `<div class="dep-item">⚡ <strong>${id}</strong> ${t('usedInLabel')}: ${r.used_in.join(', ')}</div>`;
     }).join('');
   } else {
-    depSection.style.display = 'none';
+    depList.innerHTML = `<div class="dep-item">${t('impactNoRefs')}</div>`;
   }
+  // Always: the list above is what the scan found, not proof of absence.
+  depList.innerHTML += `<div class="dep-item" style="opacity:0.8">${t('impactScanScope')}</div>`;
 
   modal.style.display = 'flex';
 }
@@ -2486,6 +2488,13 @@ async function loadSoftDeleted() {
           entity_id: entity_id,
           disabled_at: (meta && meta.disabled_at) || null,
           days_left: (meta && typeof meta.days_left === 'number') ? meta.days_left : null,
+          // Resolved against the live registry by the backend. A record whose
+          // entity was renamed still points at a real entity, just not under the
+          // id it was stored with, and one that is gone is not the same thing as
+          // one that was deleted. Without the distinction both look like a failed
+          // restore.
+          status: (meta && meta.status) || 'ok',
+          current_entity_id: (meta && meta.current_entity_id) || entity_id,
         }));
     }
     // soonest to expire first: that is the row most likely to disappear on
@@ -2507,22 +2516,37 @@ async function loadSoftDeleted() {
       return;
     }
 
-    body.innerHTML = softDeleted.map(item => (
+    body.innerHTML = softDeleted.map(item => {
+      const renamed = item.status === 'renamed' && item.current_entity_id !== item.entity_id;
+      const gone = item.status === 'gone';
+      let badge = '';
+      if (renamed) {
+        badge = '<div style="margin-top:3px; font-size:0.75rem; color:var(--warning)">'
+          + t('trashRenamedTo', { id: item.current_entity_id }) + '</div>';
+      } else if (gone) {
+        badge = '<div style="margin-top:3px"><span class="reason-tag" '
+          + 'style="background:rgba(244,67,54,0.1); color:var(--danger); '
+          + 'border:1px solid rgba(244,67,54,0.3)">' + t('trashGone') + '</span></div>';
+      }
+      return (
       '<tr id="soft-row-' + item.entity_id.replace('.', '_') + '">' +
-        '<td class="entity-id">' + item.entity_id + '</td>' +
+        '<td class="entity-id">' + item.entity_id + badge + '</td>' +
         '<td style="color:var(--text-muted)">' +
           (item.disabled_at ? new Date(item.disabled_at).toLocaleString(_panelLocale()) : '—') + '</td>' +
         '<td style="color:' + _expiryColor(item.days_left) + '">' + _expiryLabel(item.days_left) + '</td>' +
         '<td class="trash-actions-cell">' +
           '<div class="trash-actions">' +
-            '<button class="btn btn-ghost" ' +
-              'onclick="restoreEntity(&#39;' + item.entity_id + '&#39;, this)">' + t('softRestoreBtn') + '</button>' +
+            (gone
+              ? '<span style="color:var(--text-muted); font-size:0.78rem">' + t('trashGoneHint') + '</span>'
+              : '<button class="btn btn-ghost" ' +
+                'onclick="restoreEntity(&#39;' + item.entity_id + '&#39;, this)">' + t('softRestoreBtn') + '</button>') +
             '<button class="btn btn-danger" ' +
               'onclick="hardDeleteEntity(&#39;' + item.entity_id + '&#39;, this)">' + t('softHardDelBtn') + '</button>' +
           '</div>' +
         '</td>' +
       '</tr>'
-    )).join('');
+      );
+    }).join('');
   } catch(e) {
     body.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--danger)">❌ ' + e.message + '</td></tr>';
   }
@@ -4122,6 +4146,11 @@ const I18N = {
     modalHardDeleteDesc: (n) => `You are about to PERMANENTLY DELETE ${n} entities. This action CANNOT be undone!`,
     modalSoftDeleteDesc: (n) => `You are about to disable ${n} entities. They will be hidden from the system and auto-deleted later.`,
     usedInLabel: 'is used in',
+    impactNoRefs: 'No known references found',
+    impactScanScope: 'Checked: automations, scripts, groups, dashboards and packages. A reference hidden inside a template, or inside an automation that has not loaded yet, will not appear here.',
+    trashRenamedTo: (p) => `renamed to ${p.id} since it was disabled`,
+    trashGone: 'no longer exists',
+    trashGoneHint: 'Nothing to restore — use Delete record',
     confirmHardDelete: (id) => `Permanently delete ${id}?\nThis action CANNOT be undone.`,
     purgeSuccessHard: (n) => `✅ Permanently deleted ${n} entities`,
     purgeSuccessSoft: (n) => `✅ Disabled ${n} entities`,
@@ -4581,6 +4610,11 @@ const I18N = {
     modalHardDeleteDesc: (n) => `你即将彻底删除 ${n} 个实体。此操作无法撤销!`,
     modalSoftDeleteDesc: (n) => `你即将禁用 ${n} 个实体。它们会从系统中隐藏,之后自动删除。`,
     usedInLabel: '被引用于',
+    impactNoRefs: '没有发现已知的引用',
+    impactScanScope: '已检查：自动化、脚本、分组、仪表盘和集成包。藏在模板里的引用，或尚未加载的自动化里的引用，不会出现在这里。',
+    trashRenamedTo: (p) => `禁用后被改名为 ${p.id}`,
+    trashGone: '已不存在',
+    trashGoneHint: '没有可恢复的内容 —— 用「删除记录」清理',
     confirmHardDelete: (id) => `彻底删除 ${id}?\n此操作无法撤销。`,
     purgeSuccessHard: (n) => `✅ 已彻底删除 ${n} 个实体`,
     purgeSuccessSoft: (n) => `✅ 已禁用 ${n} 个实体`,

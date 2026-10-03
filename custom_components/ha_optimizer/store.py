@@ -98,7 +98,8 @@ class PurgeStore:
         """Get last scan results."""
         return self._scan_data
 
-    async def async_add_soft_deleted(self, entity_ids: list[str]):
+    async def async_add_soft_deleted(self, entity_ids: list[str]):
+
         async with self._lock:
             """Record entities as soft-deleted with timestamp.
     
@@ -112,6 +113,15 @@ class PurgeStore:
             An entity that is not in the stored scan results (already purged once,
             or added to the trash from outside a purge) simply gets no snapshot,
             and restoring it is still a success - there is nothing to put back.
+
+            The registry identity is stored too, and that is not belt-and-braces:
+            since HA 2026.8 the user can rename an entity_id and choose how its
+            parts are laid out. These records are keyed by entity_id, so a rename
+            between "disabled" and "restore" orphans the record - the entity comes
+            back under its new id, the trash row can never match it again, and
+            nothing anywhere reports it. unique_id + platform + domain is the
+            triple the registry itself uses to recognise an entity, so it
+            survives exactly the change that breaks the key.
             """
             now_iso = dt_util.utcnow().isoformat()
             index = {
@@ -119,16 +129,69 @@ class PurgeStore:
                 for r in (self._scan_data.get("results") or [])
                 if isinstance(r, dict)
             }
+            ent_reg = er.async_get(self.hass) if self.hass is not None else None
             for eid in entity_ids:
                 entry: dict[str, Any] = {"disabled_at": now_iso}
                 snapshot = index.get(eid)
                 if snapshot is not None:
                     entry["scan_entry"] = snapshot
+                reg = ent_reg.async_get(eid) if ent_reg is not None else None
+                if reg is not None and reg.unique_id:
+                    entry["unique_id"] = reg.unique_id
+                    entry["platform"] = reg.platform
+                    entry["domain"] = reg.domain
                 self._soft_data[eid] = entry
             await self._soft_store.async_save(self._soft_data)
+
+    async def async_resolve_soft_deleted(self, entity_id: str) -> dict[str, Any]:
+        """Map a trash key onto the entity that exists now.
+
+        Returns {"entity_id", "status", "renamed_from", "identity_known"}, where
+        status is:
+
+        * "ok"      - the recorded entity_id still resolves;
+        * "renamed" - it does not, but the stored registry identity does, and
+                      "entity_id" is where that entity lives now;
+        * "gone"    - neither resolves. It was hard-deleted, or renamed in a way
+                      that changed its unique_id too, or its integration is gone.
+
+        `identity_known` says whether a registry identity was stored at all, so
+        a caller can tell "deleted" from "we have no way of knowing" instead of
+        reporting both with the same words. It is False for every record written
+        before this existed.
+
+        Renamed and gone are the same "not found in registry" answer to every
+        caller that only looks at the id, which is precisely how a rename comes
+        to read as a delete.
+        """
+        ent_reg = er.async_get(self.hass) if self.hass is not None else None
+        if ent_reg is None:
+            return {"entity_id": entity_id, "status": "gone", "renamed_from": None,
+                    "identity_known": False}
+        if ent_reg.async_get(entity_id) is not None:
+            return {"entity_id": entity_id, "status": "ok", "renamed_from": None,
+                    "identity_known": True}
+        meta = self._soft_data.get(entity_id) or {}
+        uid = meta.get("unique_id")
+        platform = meta.get("platform")
+        domain = meta.get("domain")
+        identity_known = bool(uid and platform and domain)
+        if identity_known:
+            current = ent_reg.async_get_entity_id(domain, platform, uid)
+            if current:
+                return {
+                    "entity_id": current,
+                    "status": "renamed",
+                    "renamed_from": entity_id,
+                    "identity_known": True,
+                }
+        return {"entity_id": entity_id, "status": "gone", "renamed_from": None,
+                "identity_known": identity_known}
     
     
-    async def async_restore_scan_entries(self, entity_ids: list[str]):
+    async def async_restore_scan_entries(self, entity_ids: list[str],
+                                          rename_map: dict[str, str] | None = None):
+
         async with self._lock:
             """Put snapshotted scan entries back after a restore.
     
@@ -145,6 +208,7 @@ class PurgeStore:
             reported. The current state is therefore re-read from the registry
             before the row is written back.
             """
+            rename_map = rename_map or {}
             results = self._scan_data.setdefault("results", [])
             present = {r.get("entity_id") for r in results if isinstance(r, dict)}
             added: list[str] = []
@@ -152,10 +216,18 @@ class PurgeStore:
             for eid in entity_ids:
                 meta = self._soft_data.get(eid) or {}
                 snapshot = meta.get("scan_entry")
-                if not isinstance(snapshot, dict) or eid in present:
+                # The snapshot was taken under the id the entity had when it was
+                # disabled. Restoring it verbatim puts a row back for an
+                # entity_id that no longer exists, so the entity is invisible in
+                # the panel again under a name nothing can find. Write the row
+                # under the id the entity has today, and ask the registry about
+                # that id.
+                target = rename_map.get(eid, eid)
+                if not isinstance(snapshot, dict) or target in present:
                     continue
                 entry = dict(snapshot)
-                current = ent_reg.async_get(eid) if ent_reg is not None else None
+                entry["entity_id"] = target
+                current = ent_reg.async_get(target) if ent_reg is not None else None
                 if current is not None:
                     entry["disabled"] = bool(current.disabled)
                     if not current.disabled:
@@ -169,16 +241,17 @@ class PurgeStore:
                             if not reasons:
                                 entry["risk_level"] = "low"
                 results.append(entry)
-                present.add(eid)
+                present.add(target)
                 added.append(eid)
-                self._added_since_scan[eid] = entry
+                self._added_since_scan[target] = entry
             if added:
                 _LOGGER.debug("Restored %d scan result entries from the trash", len(added))
                 await self._scan_store.async_save(self._scan_data)
             return added
     
     
-    async def async_remove_soft_deleted(self, entity_ids: list[str]):
+    async def async_remove_soft_deleted(self, entity_ids: list[str]):
+
         async with self._lock:
             """Remove entities from soft-delete tracking (restored or hard-deleted)."""
             for eid in entity_ids:
@@ -204,7 +277,8 @@ class PurgeStore:
                 pass
         return expired
 
-    async def async_remove_from_scan_results(self, entity_ids: list[str]):
+    async def async_remove_from_scan_results(self, entity_ids: list[str]):
+
         async with self._lock:
             """Remove specific entity_ids from stored scan results (post-purge cleanup)."""
             if not self._scan_data or "results" not in self._scan_data:
@@ -224,7 +298,8 @@ class PurgeStore:
                 await self._scan_store.async_save(self._scan_data)
     
     
-    async def async_clear_scan_results(self):
+    async def async_clear_scan_results(self):
+
         async with self._lock:
             """Clear scan results."""
             self._scan_data = {}
