@@ -52,32 +52,36 @@ OUTCOME_RUNNING = "running"
 OUTCOME_UNKNOWN = "unknown"
 
 
-async def _ensure_trace_component(hass) -> tuple[Any, str]:
-    """Make sure the trace component is set up, and return (DATA_TRACE, state).
+async def _load_traces(hass) -> tuple[list[dict[str, Any]] | None, str]:
+    """Return the automations' traces, using the component's own API.
 
-    The storage this module reads is created by the trace component's
-    async_setup, which runs only when something asks for tracing. Nothing did,
-    so `hass.data[DATA_TRACE]` was absent and the panel reported "this instance
-    has no trace data" about automations that had run a minute earlier. Loading
-    the component first is what Home Assistant's own trace UI does.
+    Returns (traces, state) where state is "unavailable", "empty" or "ok".
 
-    Returns ("unavailable", reason) when the component does not exist in this
-    version, ("empty", "") when it is loaded but holds nothing, and
-    (DATA_TRACE, "ok") when it is loaded. The three are different facts.
+    Two things this replaces, both of which were quietly wrong:
+
+    * it reads the storage under `"automation.<entity_id>"` keys, as
+      `trace/util.py` itself does (`domain, item_id = key.split(".", 1)`). The
+      previous code looked the same data up by `config_entry_id`, which never
+      matches a key - so no run could be found, however much tracing was on;
+    * it restores traces saved at shutdown first, which every helper in
+      `trace/util.py` does and the previous code did not, so everything
+      recorded before a restart was invisible as well.
     """
     try:
-        from homeassistant.components.trace.const import DATA_TRACE  # noqa: PLC0415
+        from homeassistant.components.trace.util import (  # noqa: PLC0415
+            async_list_traces,
+            async_restore_traces,
+        )
     except Exception as exc:  # noqa: BLE001
+        _LOGGER.debug("trace helpers unavailable: %s", exc)
         return None, "unavailable"
     try:
-        from homeassistant.setup import async_setup_component  # noqa: PLC0415
-
-        await async_setup_component(hass, "trace", {})
+        await async_restore_traces(hass)
+        traces = await async_list_traces(hass, "automation", None)
     except Exception as exc:  # noqa: BLE001
-        _LOGGER.debug("Could not set up the trace component: %s", exc)
-    if (hass.data or {}).get(DATA_TRACE) is None:
-        return DATA_TRACE, "empty"
-    return DATA_TRACE, "ok"
+        _LOGGER.warning("Could not read traces: %s", exc)
+        return None, "unavailable"
+    return (traces or []), ("ok" if traces else "empty")
 
 
 # ── failure diagnosis ──────────────────────────────────────────────────────
@@ -235,8 +239,8 @@ class AutomationRunAnalyzer:
         # an empty list at this point is what made 1.7.20 look exactly like
         # 1.7.18 - the listing code sat below this branch and was never reached
         # in the normal case.
-        buckets = (self.hass.data or {}).get(data_key) or {}
-        if buckets:
+        traces, state = await _load_traces(self.hass)
+        if state == "ok":
             result["coverage"] = {
                 "traces_available": True,
                 "state": "ok",
@@ -252,10 +256,16 @@ class AutomationRunAnalyzer:
         names, enumerate_error = self._automation_names()
         if enumerate_error:
             result["coverage"]["enumerate_error"] = enumerate_error
+        # Group the returned traces by the automation they belong to, using the
+        # same key the component uses: "automation.<entity_id>".
+        by_entity: dict[str, list[dict[str, Any]]] = {}
+        for t in traces or []:
+            key = t.get("key") or ""
+            entity_id = key.split(".", 1)[1] if "." in key else key
+            by_entity.setdefault(entity_id, []).append(t)
         rows: list[dict[str, Any]] = []
         for automation_id, meta in names.items():
-            bucket = buckets.get(automation_id)
-            runs = [classify(d) for d in _trace_dicts(bucket)] if bucket else []
+            runs = [classify(d) for d in by_entity.get(automation_id, [])]
             row = self._row(automation_id, meta, runs)
             # last_triggered is the one thing available for every automation.
             # It says the automation ran, and when - not whether it worked, and
@@ -314,8 +324,10 @@ class AutomationRunAnalyzer:
             # fact available for an automation nobody has traced.
             state = self.hass.states.get(entry.entity_id)
             attrs = state.attributes if state is not None else {}
-            key = entry.config_entry_id or entry.entity_id
-            out[key] = {
+            # Keyed by entity_id: that is what the trace storage uses
+            # ("automation.<entity_id>"), and joining on anything else is how
+            # this feature spent three releases finding nothing.
+            out[entry.entity_id] = {
                 "entity_id": entry.entity_id,
                 "name": (attrs.get("friendly_name")
                          or entry.name or entry.original_name or entry.entity_id),
