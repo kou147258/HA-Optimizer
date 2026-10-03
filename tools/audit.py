@@ -493,6 +493,29 @@ def do_release(version: str, dry_run: bool, notes: Path, title: Path,
         print(f"{tag} description updated")
         return 0
 
+    # The version on disk must be the version being released. This gate exists
+    # because two releases shipped as 1.7.17 and 1.7.18 while const.py still
+    # said 1.7.16 - the panel URL is built from VERSION, so `?v=` never changed,
+    # /local/ kept serving 31-day-cached bytes, and the delivered files could not
+    # reach the browser at all. check_version only proves the four sources agree
+    # with each other, never with the release.
+    on_disk = json.loads(git("show", f"HEAD:{PREFIX}manifest.json"))["version"]
+    const_v = re.search(r'VERSION\s*=\s*"([^"]+)"',
+                        git("show", f"HEAD:{PREFIX}const.py")).group(1)
+    file_v = re.search(r"PANEL_FILE_BUILD\s*=\s*'([^']+)'",
+                       git("show", f"HEAD:{PREFIX}panel.html"))
+    file_v = file_v.group(1) if file_v else None
+    if on_disk != version:
+        print(f"ABORT: the tree says {on_disk} (const.py {const_v}, "
+              f"panel.html {file_v}) but you asked to release {version}.")
+        print("       Bump the version first - the panel URL is built from it, "
+              "so a mismatch pins every browser to a cached file.")
+        return 2
+    if const_v != version or (file_v and file_v != version):
+        print(f"ABORT: const.py={const_v} panel.html={file_v} do not match "
+              f"manifest.json={on_disk}.")
+        return 2
+
     audit = Audit()
     files = package_files("HEAD")
     check_package_contents(audit, files)

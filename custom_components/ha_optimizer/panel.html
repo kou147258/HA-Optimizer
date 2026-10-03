@@ -6099,9 +6099,14 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSavedLang();
 });
 </script>
-<!-- How many tabs this build's markup declares. The strip above compares the
-     live DOM against it, so a page running a different file says so itself. -->
-<script>const EXPECTED_TAB_COUNT = 10;</script>
+<!-- What THIS FILE is. The URL says which version asked for it, which is a
+     different question: Home Assistant only rewrites that query on restart, and
+     /local/ is cached 31 days per URL, so the two can disagree for a month.
+     The strip prints both, and a mismatch becomes visible instead of having to
+     be inferred. Bumped with the version; check_build_stamp keeps it in step
+     with const.py. -->
+<script>const PANEL_FILE_BUILD = '1.7.19';
+       const EXPECTED_TAB_COUNT = 10;</script>
 <script>
 /* What this browser actually loaded, as facts. The file on disk was correct
    while the page was running an older one, and nothing on screen said so.
@@ -6109,10 +6114,18 @@ document.addEventListener('DOMContentLoaded', () => {
 (function () {
   var stamp = document.getElementById('buildDiag');
   if (!stamp) return;
+  // Re-read here: the version in the URL was parsed by the earlier script and
+  // is not in scope. Which version is ASKING is not the same question as which
+  // file is RUNNING, and with a 31-day cache on /local/ they can disagree for
+  // a month after a delivered file.
+  var urlBuild = new URLSearchParams(location.search).get('v') || '?';
   var tabs = document.querySelectorAll('.tab').length;
   var esc = (typeof escapeHtml === 'function');
-  stamp.textContent = '· tabs=' + tabs + ' · esc=' + (esc ? 'ok' : 'MISSING');
-  stamp.style.color = (tabs === EXPECTED_TAB_COUNT && esc)
+  var agrees = (urlBuild === PANEL_FILE_BUILD);
+  stamp.textContent = '· file ' + PANEL_FILE_BUILD
+    + (agrees ? '' : '  ←  URL 是 ' + urlBuild + '，浏览器在用旧缓存')
+    + ' · tabs=' + tabs + ' · esc=' + (esc ? 'ok' : 'MISSING');
+  stamp.style.color = (agrees && tabs === EXPECTED_TAB_COUNT && esc)
     ? 'var(--text-muted)' : 'var(--danger)';
 })();
 </script>
