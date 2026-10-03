@@ -462,8 +462,37 @@ def verify_served(tag: str, tree7: str, audit: Audit) -> None:
 
 
 # ── release ────────────────────────────────────────────────────────────────
-def do_release(version: str, dry_run: bool, notes: Path, title: Path) -> int:
+def do_release(version: str, dry_run: bool, notes: Path, title: Path,
+               notes_only: bool = False) -> int:
     tag = f"v{version}"
+    text = title.read_text(encoding="utf-8").strip()
+    body = notes.read_text(encoding="utf-8")
+    if "\ufffd" in text + body:
+        print("ABORT: replacement character in the release text")
+        return 1
+
+    if notes_only:
+        # Correcting the description of a release that is already out. Nothing
+        # is rebuilt and the tag is not touched: the bytes users install are
+        # already published, and the only thing wrong is the text describing
+        # them. Verified by reading it back, because a silent no-op here would
+        # look exactly like success.
+        if not release_exists(tag):
+            print(f"ABORT: {tag} does not exist")
+            return 2
+        gh(["release", "edit", tag, "--repo", REPO, "--title", text,
+            "--notes-file", str(notes)])
+        rel = gh_json(f"repos/{REPO}/releases/tags/{tag}")
+        same_title = rel.get("name") == text
+        same_body = rel.get("body", "") == body
+        print(f"title matches: {same_title}")
+        print(f"body  matches: {same_body}  ({len(rel.get('body', ''))} chars)")
+        if not (same_title and same_body):
+            print("the edit did not take")
+            return 1
+        print(f"{tag} description updated")
+        return 0
+
     audit = Audit()
     files = package_files("HEAD")
     check_package_contents(audit, files)
@@ -566,6 +595,10 @@ def main() -> int:
     p_rel = sub.add_parser("release", help="verify, tag, publish, then read back")
     p_rel.add_argument("version")
     p_rel.add_argument("--dry-run", action="store_true")
+    p_rel.add_argument("--notes-only", action="store_true",
+                       help="update title and body only: no tag, no rebuild, "
+                            "no upload - for correcting the text of a release "
+                            "that was described badly")
     p_rel.add_argument("--notes")
     p_rel.add_argument("--title")
 
@@ -604,7 +637,7 @@ def main() -> int:
             if not p.is_file():
                 print(f"missing {p}")
                 return 2
-        return do_release(args.version, args.dry_run, notes, title)
+        return do_release(args.version, args.dry_run, notes, title, args.notes_only)
 
     if cmd == "verify":
         tag = args.tag if args.tag.startswith("v") else f"v{args.tag}"

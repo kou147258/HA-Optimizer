@@ -98,6 +98,14 @@ class ScanResult:
         # act on, and it is invisible in a flat list of 2000.
         self.area_id = area_id
         self.area_name = area_name
+        # Filled in by the write measurement after the scan has run. None means
+        # "not measured", which is not the same as zero.
+        self.writes_30d: int | None = None
+        self.distinct_states_30d: int | None = None
+        self.writes_per_day: float | None = None
+        self.write_amplification: float | None = None
+        self.write_alert = False
+        self.measured = False
 
     def to_dict(self) -> dict:
         return {
@@ -118,6 +126,12 @@ class ScanResult:
             "unique_id": self.unique_id,
             "area_id": self.area_id,
             "area_name": self.area_name,
+            "writes_30d": self.writes_30d,
+            "distinct_states_30d": self.distinct_states_30d,
+            "writes_per_day": self.writes_per_day,
+            "write_amplification": self.write_amplification,
+            "write_alert": self.write_alert,
+            "measured": self.measured,
         }
 
 
@@ -193,6 +207,30 @@ class DataScanner:
             if r.area_id:
                 r.area_name = area_names.get(r.area_id, r.area_id)
 
+        # How much each candidate actually costs to keep. Only the candidates
+        # are measured - asking the database about 2400 entities to learn
+        # something about 200 of them is precisely the waste this tool exists
+        # to point at.
+        from .write_measure import annotate as _annotate_writes  # noqa: PLC0415
+        from .write_measure import measure_candidates  # noqa: PLC0415
+
+        measurement = await measure_candidates(self.hass, [r.entity_id for r in results])
+        for r in results:
+            stats = (measurement.get("by_entity") or {}).get(r.entity_id)
+            r.measured = bool(measurement.get("measured"))
+            if stats is None:
+                continue
+            writes = stats["writes"]
+            distinct = max(stats["distinct_states"], 1)
+            r.writes_30d = writes
+            r.distinct_states_30d = stats["distinct_states"]
+            r.writes_per_day = round(writes / 30, 1)
+            r.write_amplification = round(writes / distinct, 1)
+            r.write_alert = bool(
+                writes / 30 >= 100 or (writes / distinct >= 50 and writes / 30 >= 10)
+            )
+        write_rollup = _annotate_writes([r.to_dict() for r in results], measurement)
+
         # Build statistics
         total = len(ent_reg.entities)
         found = len(results)
@@ -209,6 +247,14 @@ class DataScanner:
         return {
             "results": [r.to_dict() for r in results],
             "groups": self._build_groups(results),
+            # Separate from the results on purpose: a query that could not run
+            # must not turn into "0 writes" on 2000 rows.
+            "write_measurement": {
+                "measured": write_rollup["measured"],
+                "reason": write_rollup["reason"],
+                "window_days": 30,
+                "alerts": sum(1 for r in results if r.write_alert),
+            },
             "statistics": {
                 "total_entities": total,
                 "candidates_found": found,

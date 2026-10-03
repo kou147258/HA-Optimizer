@@ -675,6 +675,16 @@
 .group-plats { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
 .group-plat { font-size:0.7rem; padding:1px 5px; border-radius:4px; background:var(--surface2); color:var(--text-muted); }
 .group-plat b { color:var(--text); }
+.group-writes { margin-top:6px; font-size:0.75rem; color:var(--text-muted);
+  display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.group-perday { opacity:0.8; }
+.group-alert { padding:1px 6px; border-radius:999px; font-weight:700;
+  background:rgba(244,67,54,0.12); color:var(--danger); }
+.writes-cell { font-variant-numeric:tabular-nums; text-align:center; }
+.writes-alert { color:var(--danger); font-weight:700; }
+.writes-none { color:var(--text-muted); }
+.writes-unmeasured { color:var(--text-muted); font-style:italic; }
+
 .group-actions { display:flex; gap:6px; margin-top:8px; }
 .btn-xs { padding:3px 8px; font-size:0.72rem; }
 
@@ -1336,6 +1346,7 @@
             <th onclick="sortBy('risk_level')" data-i18n="thRisk">Risk Level</th>
             <th data-i18n="thReason">Reason</th>
             <th onclick="sortBy('last_changed')" data-i18n="thLastChanged">Last Changed</th>
+            <th data-i18n="writesCol">writes / 30d</th>
             <th data-i18n="thUsedIn">Used In</th>
             <th data-i18n="thSource">Source</th>
           </tr>
@@ -1757,7 +1768,7 @@ async function loadLastResults() {
     try {
       const parsed = JSON.parse(cached);
       if (parsed.results && parsed.results.length > 0) {
-        displayResults(parsed.results);
+        displayResults(parsed.results, parsed.groups, parsed.write_measurement, parsed.write_rollup);
         updateStats(parsed.statistics || {});
         const scanTime = parsed.statistics?.scanned_at
           ? new Date(parsed.statistics.scanned_at).toLocaleString(_panelLocale())
@@ -1803,12 +1814,12 @@ async function triggerScan() {
 
     if (data && Array.isArray(data.results)) {
       if (data.results.length > 0) {
-        displayResults(data.results);
+        displayResults(data.results, data.groups, data.write_measurement, data.write_rollup);
         updateStats(data.statistics || {});
         localStorage.setItem('ha_optimizer_results', JSON.stringify(data));
         toast('success', `✅ ${t('scanDone', data.results.length)}`);
       } else {
-        displayResults([]);
+        displayResults([], data.groups, data.write_measurement, data.write_rollup);
         updateStats(data.statistics || {});
         localStorage.setItem('ha_optimizer_results', JSON.stringify(data));
         toast('success', `✅ ${t('scanClean')}`);
@@ -1834,7 +1845,7 @@ async function fetchAndDisplayResults() {
     const raw = await callService('ha_optimizer', 'get_results', {});
     const data = extractData(raw);
     if (data && Array.isArray(data.results) && data.results.length > 0) {
-      displayResults(data.results);
+      displayResults(data.results, data.groups, data.write_measurement, data.write_rollup);
       updateStats(data.statistics || {});
       localStorage.setItem('ha_optimizer_results', JSON.stringify(data));
       return true;
@@ -1880,6 +1891,23 @@ function generateMockData() {
 // table is the detail behind whatever group is selected.
 let resultGroups = [];
 let groupFilter = null;
+let writeMeasurement = null;
+let writeRollup = null;
+
+/** One cell of the writes column. Three different facts, three renderings. */
+function _writesCell(r) {
+  if (!writeMeasurement || !writeMeasurement.measured) {
+    return `<span class="writes-unmeasured" title="${escapeHtml(t('writesUnmeasured'))}">—</span>`;
+  }
+  if (r.writes_30d === null || r.writes_30d === undefined) {
+    return `<span class="writes-none">0</span>`;
+  }
+  const amp = escapeHtml(t('writesAmp', { n: r.write_amplification }));
+  if (r.write_alert) {
+    return `<span class="writes-alert" title="${amp}">${r.writes_30d} ⚠</span>`;
+  }
+  return `<span class="${r.writes_30d ? '' : 'writes-none'}" title="${amp}">${r.writes_30d}</span>`;
+}
 
 function renderGroupStrip() {
   const host = document.getElementById('groupStrip');
@@ -1908,6 +1936,16 @@ function renderGroupStrip() {
           ? `<span class="risk-more">+${g.platform_count - Object.keys(g.platforms || {}).length}</span>` : ''}
       </div>
       <div class="group-plats">${plats}</div>
+      ${(() => {
+        if (!writeMeasurement || !writeMeasurement.measured) return '';
+        const rb = (writeRollup || {})[g.area_name || ''];
+        if (!rb || !rb.measured) return '';
+        const days = writeMeasurement.window_days || 30;
+        return `<div class="group-writes">${escapeHtml(t('groupWrites', { n: Math.round(rb.writes_30d) }))}`
+          + `<span class="group-perday">≈${Math.round(rb.writes_30d / days)}/day</span>`
+          + (rb.alerts ? `<span class="group-alert">${escapeHtml(t('groupWorth', { n: rb.alerts }))}</span>` : '')
+          + `</div>`;
+      })()}
       <div class="group-actions">
         <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();filterByGroup('${id}')">${t('groupFilter')}</button>
         <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();selectGroup('${id}')">${t('groupSelect')}</button>
@@ -1935,8 +1973,10 @@ function selectGroup(areaId) {
   toast(t('groupSelected', { n: ids.length }), 'info');
 }
 
-function displayResults(results, groups) {
+function displayResults(results, groups, writeInfo, writeRoll) {
   allResults = results;
+  writeMeasurement = writeInfo || null;
+  writeRollup = writeRoll || null;
   // Drop a stale group filter when a new scan arrives without groups, or the
   // table would stay empty with no visible reason why.
   if (groups !== undefined) {
@@ -2344,6 +2384,7 @@ function renderTable() {
       <td><span class="risk-badge ${riskClass}">${riskLabel}</span></td>
       <td><div class="reasons">${reasons}</div></td>
       <td style="white-space:nowrap; color:var(--text-muted)">${lastChanged}</td>
+      <td class="writes-cell">${_writesCell(r)}</td>
       <td>${usedInHtml}</td>
       <td>${yamlBadge}</td>
     </tr>`;
@@ -2814,7 +2855,7 @@ async function _reloadScanList() {
     if (typeof loadResults === 'function') { await loadResults(); return; }
     if (Array.isArray(allResults)) {
       const fresh = extractData(await callService('ha_optimizer', 'get_results', {}));
-      if (fresh && Array.isArray(fresh.results)) displayResults(fresh.results, fresh.groups);
+      if (fresh && Array.isArray(fresh.results)) displayResults(fresh.results, fresh.groups, fresh.write_measurement, fresh.write_rollup);
     }
   } catch(e) { /* the trash view is what the user is looking at */ }
 }
@@ -2936,7 +2977,7 @@ async function restoreEntity(id, btn) {
     try {
       const fresh = extractData(await callService('ha_optimizer', 'get_results', {}));
       if (fresh && Array.isArray(fresh.results)) {
-        displayResults(fresh.results, fresh.groups);
+        displayResults(fresh.results, fresh.groups, fresh.write_measurement, fresh.write_rollup);
         updateStats(fresh.statistics || {});
         localStorage.setItem('ha_optimizer_results', JSON.stringify(fresh));
       }
@@ -4337,6 +4378,11 @@ const I18N = {
     thDisabledAt: 'Disabled At',
     thExpiresIn: 'Auto-purge in',
     trashSummary: (p) => `${p.n} in the trash`,
+    writesCol: 'writes / 30d',
+    writesUnmeasured: 'not measured',
+    writesAmp: (p) => `${p.n} writes per distinct value`,
+    groupWrites: (p) => `${p.n} writes in 30 days`,
+    groupWorth: (p) => `${p.n} worth a look`,
     tabAutos: '🤖 Automations',
     autoSummaryTitle: 'Automation runs',
     autoStatRuns: 'runs known', autoStatOk: 'succeeded', autoStatFailed: 'failed',
@@ -4817,6 +4863,11 @@ const I18N = {
     thDisabledAt: '禁用时间',
     thExpiresIn: '自动清理倒计时',
     trashSummary: (p) => `回收站里有 ${p.n} 个`,
+    writesCol: '30天写入',
+    writesUnmeasured: '未测量',
+    writesAmp: (p) => `每个不同取值写了 ${p.n} 次`,
+    groupWrites: (p) => `30 天写入 ${p.n} 次`,
+    groupWorth: (p) => `${p.n} 个值得看`,
     tabAutos: '🤖 自动化',
     autoSummaryTitle: '自动化运行情况',
     autoStatRuns: '已知运行', autoStatOk: '成功', autoStatFailed: '失败',
