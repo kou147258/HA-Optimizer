@@ -2163,14 +2163,6 @@ class IntegrationHealthAnalyzer:
                     for eid, cnt in unavail_7d.items()
                 }
 
-                # Total entity count per platform (for ratio weighting)
-                rows_total = session.execute(text("""
-                    SELECT metadata_id, COUNT(*) as cnt
-                    FROM states
-                    GROUP BY metadata_id
-                    LIMIT 1
-                """)).fetchall()
-
             ent_reg = er.async_get(self.hass)
             dev_reg = dr.async_get(self.hass)
 

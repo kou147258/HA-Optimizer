@@ -5,8 +5,18 @@ Why this module exists
 An automation that throws leaves almost no trace anywhere a panel can see. It
 is not an event, so it does not appear in the logbook; and on an instance where
 the error-log endpoint is unavailable there is nothing else to read. What DOES
-exist is Home Assistant's own `trace` component, which keeps the last five runs
-of every automation and records how each run ended.
+exist is Home Assistant's own `trace` component, which records how each
+*recorded* run ended.
+
+Recorded is the operative word, and the limit is not five-by-default either.
+Measured on HA 2026.8.3: six automations, three of them triggered twenty
+minutes earlier, and `hass.data[DATA_TRACE]` was empty. `trace` only creates a
+store for an automation once someone has opened its Traces page, or the
+automation's YAML sets `stored_traces`. Home Assistant's documentation says each
+automation keeps its last five runs by default; on this instance that is not
+what happens, and a page built on that assumption reports "healthy" for
+automations it has never observed. So coverage is reported next to the
+results, and an untraced automation is listed as unmeasured.
 
 That is the source, and the shape below is taken from HA 2026.8.3's
 `homeassistant/components/trace/models.py` rather than from memory:
@@ -50,6 +60,33 @@ OUTCOME_FAILED = "failed"
 OUTCOME_CONDITION = "condition_stopped"
 OUTCOME_RUNNING = "running"
 OUTCOME_UNKNOWN = "unknown"
+
+
+async def _ensure_trace_component(hass) -> tuple[str, str]:
+    """Make sure the `trace` component is loaded. Returns (state, reason).
+
+    `trace` builds its store in `async_setup`, and nothing loads it on an
+    instance where nobody has opened a trace page - so reading `hass.data`
+    without setting it up reports "no traces" for a store that was never
+    created. That is the difference between "this automation has no runs" and
+    "we could not look".
+
+    state is "ok" or "unavailable"; reason is filled in for the second so the
+    panel can say why instead of showing a coverage gap with no explanation.
+    """
+    try:
+        from homeassistant.setup import async_setup_component  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.debug("async_setup_component unavailable: %s", exc)
+        return "unavailable", f"homeassistant.setup is not importable ({exc})"
+    try:
+        loaded = await async_setup_component(hass, "trace", {})
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.warning("Could not set up the trace component: %s", exc)
+        return "unavailable", f"the trace component raised while loading ({exc})"
+    if not loaded:
+        return "unavailable", "the trace component refused to set up"
+    return "ok", ""
 
 
 async def _load_traces(hass) -> tuple[list[dict[str, Any]] | None, str]:
@@ -226,12 +263,13 @@ class AutomationRunAnalyzer:
             "coverage": {"traces_available": False, "note": ""},
         }
 
-        data_key, state = await _ensure_trace_component(self.hass)
+        state, reason = await _ensure_trace_component(self.hass)
         if state == "unavailable":
             result["coverage"] = {
                 "traces_available": False,
                 "state": "unavailable",
                 "noteKey": "autoCoverUnavailable",
+                "reason": reason,
             }
             return result
         # No early return here. An absent trace store says the OUTCOMES are
@@ -303,8 +341,10 @@ class AutomationRunAnalyzer:
     def _automation_names(self) -> tuple[dict[str, dict[str, Any]], str]:
         """Automation id -> name and disabled state, from the entity registry.
 
-        Traces are keyed by the automation's config-entry id, which is not the
-        entity_id, so the registry is what connects the two.
+        Keyed by entity_id, because that is what the trace store keys by
+        ("automation.<entity_id>"). An earlier version of this docstring claimed
+        traces are keyed by the config-entry id; that claim is what the previous
+        three releases were built on, and it never matches a stored key.
         """
         out: dict[str, dict[str, Any]] = {}
         try:

@@ -77,10 +77,16 @@ def _query_chunk(session, text, is_mysql: bool, chunk: list[str]) -> dict[str, d
         ts_expr = "UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL 30 DAY))"
     else:
         ts_expr = "strftime('%s', 'now', '-30 days')"
+    # The one column to count distinct values in is `state`. In HA 2026.8 the
+    # name `old_state` still appears in the recorder's ORM - as a relationship()
+    # to the previous row, not a column - and `new_state` does not exist at all,
+    # so an expression built from them type-checks, reads plausibly in review,
+    # and only fails on the user's database. Distinct values is also the same
+    # measure the recorder analysis in scanner.py already uses.
     rows = session.execute(text(f"""
         SELECT entity_id,
-               COUNT(*)          AS writes,
-               COUNT(DISTINCT old_state || '|' || new_state) AS distinct_states
+               COUNT(*)              AS writes,
+               COUNT(DISTINCT state) AS distinct_states
         FROM states
         WHERE last_updated_ts >= {ts_expr}
           AND entity_id IN ({_quote_list(chunk)})

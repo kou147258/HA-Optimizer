@@ -1,6 +1,6 @@
 """Constants for HA Optimizer."""
 DOMAIN = "ha_optimizer"
-VERSION = "1.7.22"
+VERSION = "1.7.23"
 
 # Config keys
 CONF_SCAN_INTERVAL_DAYS = "scan_interval_days"
@@ -56,11 +56,9 @@ EVENT_PURGE_COMPLETE = f"{DOMAIN}_purge_complete"
 # Fingerprint
 FINGERPRINT_STORE_KEY = f"{DOMAIN}_fingerprint"
 SERVICE_ANALYZE_FINGERPRINT = "analyze_fingerprint"
-# Automation run health. Reads the trace component, which keeps the last 5
-# runs of every automation by default.
-SERVICE_ANALYZE_AUTOMATION_RUNS = "analyze_automation_runs"
-# Automation run health. Reads the trace component, which keeps the last 5
-# runs of every automation by default.
+# Automation run health. Reads the trace component, which only stores runs
+# for automations that have actually been traced - automation_runs.py
+# explains why coverage is reported rather than assumed.
 SERVICE_ANALYZE_AUTOMATION_RUNS = "analyze_automation_runs"
 SERVICE_COLLECT_BASELINE = "collect_baseline"
 

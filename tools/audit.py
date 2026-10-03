@@ -230,6 +230,11 @@ TOOL_CHECKS: list[tuple[str, str, list[str]]] = [
     ("identity.rename.cp", "identity checks can still fail", ["counterproof_rename_identity.py"]),
     ("source.trace_join", "traces are read the way HA stores them", ["test_trace_join.py"]),
     ("source.trace_join.cp", "trace-join checks can still fail", ["counterproof_trace_join.py"]),
+    ("source.py_names", "every name the component calls is defined", ["test_py_names.py"]),
+    ("source.py_names.cp", "py-name checks can still fail", ["counterproof_py_names.py"]),
+    ("source.recorder_sql", "SQL columns exist in the recorder schema", ["test_recorder_sql.py"]),
+    ("source.recorder_sql.cp", "recorder-SQL checks can still fail",
+     ["counterproof_recorder_sql.py"]),
 ]
 
 
