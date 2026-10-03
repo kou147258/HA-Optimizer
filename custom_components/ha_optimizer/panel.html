@@ -642,7 +642,20 @@
      is not meant to be looked at. Unconditional: inside a media query it
      would simply not exist on a wide panel, which is the mistake this whole
      change exists to stop repeating. */
-  .group-strip { display:flex; gap:10px; overflow-x:auto; padding:2px 2px 10px; }
+  .auto-row {
+  padding:12px 14px; border:1px solid var(--border); border-radius:10px; background:var(--surface);
+}
+.auto-row + .auto-row { margin-top:0; }
+.auto-ok, .auto-fail, .auto-cond, .auto-muted {
+  padding:2px 8px; border-radius:999px; font-size:0.72rem; font-weight:700; white-space:nowrap;
+}
+.auto-ok    { background:rgba(76,175,80,0.12);  color:var(--success); }
+.auto-fail  { background:rgba(244,67,54,0.12);  color:var(--danger); }
+.auto-cond  { background:rgba(255,152,0,0.12);  color:var(--warning); }
+.auto-muted { background:var(--surface2);        color:var(--text-muted); }
+.auto-pill  { padding:2px 8px; border-radius:999px; font-size:0.72rem; font-weight:600; }
+
+.group-strip { display:flex; gap:10px; overflow-x:auto; padding:2px 2px 10px; }
 .group-card {
   flex:0 0 auto; min-width:180px; max-width:260px; padding:10px 12px; cursor:pointer;
   border:1px solid var(--border); border-radius:10px; background:var(--surface);
@@ -1159,6 +1172,7 @@
     <div class="tab" onclick="switchTab('deadcode')"><span data-i18n="tabDeadcode">🔍 Dead Code</span></div>
     <div class="tab" onclick="switchTab('health')"><span data-i18n="tabHealth">💚 Health</span></div>
     <div class="tab" onclick="switchTab('fingerprint')"><span data-i18n="tabFingerprint">🫆 Fingerprint</span></div>
+    <div class="tab" onclick="switchTab('autos')"><span data-i18n="tabAutos">🤖 Automations</span></div>
     <div class="tab" onclick="switchTab('addon')"><span data-i18n="tabAddon">🧩 Add-ons</span></div>
     <div class="tab" onclick="switchTab('soft')"><span data-i18n="tabSoft">🗑️ Trash</span></div>
   </div>
@@ -1498,6 +1512,8 @@
      makes that a real question, so the build says so on the screen. The
      value comes from the ?v= on this iframe URL, which the integration sets
      from the same constant the manifest is built from. -->
+<div id="tabAutos" style="display:none"></div>
+
 <div class="group-strip" id="groupStrip" style="display:none"></div>
 
 <div class="build-stamp">HA Optimizer <span id="buildVersion">…</span></div>
@@ -2540,6 +2556,112 @@ function updateSoftDeleteCount(delta) {
 // ================================================================
 // SOFT DELETE TAB
 // ================================================================
+// ── Automation run health ───────────────────────────────────────────────────
+// Reads Home Assistant's own trace component. A failing automation emits no
+// event, so there is nothing to subscribe to - this is the only structured
+// source of "it ran and it broke".
+async function loadAutomationRuns() {
+  const host = document.getElementById('tabAutos');
+  if (!host) return;
+  if (host.dataset.loaded) return;
+  host.innerHTML = '<div style="text-align:center; padding:40px; color:var(--text-muted)">'
+    + escapeHtml(t('loading')) + '</div>';
+  try {
+    const raw = await callService('ha_optimizer', 'analyze_automation_runs', {});
+    const d = extractData(raw) || {};
+    host.dataset.loaded = '1';
+    renderAutomationRuns(host, d);
+  } catch (e) {
+    host.dataset.loaded = '1';
+    host.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><h3>'
+      + escapeHtml(t('errTitle')) + '</h3><p>' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+const AUTO_OUTCOME = {
+  ok:             { cls: 'auto-ok',   key: 'autoOutcomeOk' },
+  failed:         { cls: 'auto-fail', key: 'autoOutcomeFailed' },
+  condition_stopped: { cls: 'auto-cond', key: 'autoOutcomeCondition' },
+  running:        { cls: 'auto-muted',key: 'autoOutcomeRunning' },
+  unknown:        { cls: 'auto-muted',key: 'autoOutcomeUnknown' },
+};
+
+function renderAutomationRuns(host, d) {
+  // 1. Coverage, before anything else. A panel that says "no failures" when it
+  //    read nothing is the exact failure this project keeps fixing.
+  const cov = d.coverage || {};
+  let html = '';
+  if (!cov.traces_available) {
+    html += `<div style="display:flex; gap:10px; padding:10px 12px; margin-bottom:20px;
+        border-radius:6px; background:rgba(255,152,0,0.1); border:1px solid rgba(255,152,0,0.35)">
+      <span>⚠️</span><div style="font-size:0.85rem">${escapeHtml(cov.note || t('autoNoTraces'))}</div></div>`;
+  } else {
+    const s = d.summary || {};
+    const rate = s.success_rate === null || s.success_rate === undefined ? '—' : s.success_rate + '%';
+    html += `<div class="stat-card" style="text-align:left; padding:16px; margin-bottom:20px">
+      <h3 style="margin-bottom:12px; font-size:1rem">${escapeHtml(t('autoSummaryTitle'))}</h3>
+      <div style="display:flex; flex-wrap:wrap; gap:18px; font-size:0.85rem">
+        <span>${escapeHtml(t('autoStatRuns'))}: <b>${s.runs_known ?? 0}</b></span>
+        <span>${escapeHtml(t('autoStatOk'))}: <b style="color:var(--success)">${s.successes ?? 0}</b></span>
+        <span>${escapeHtml(t('autoStatFailed'))}: <b style="color:var(--danger)">${s.failures ?? 0}</b></span>
+        <span>${escapeHtml(t('autoStatCond'))}: <b style="color:var(--text-muted)">${s.condition_stops ?? 0}</b></span>
+        <span>${escapeHtml(t('autoStatRate'))}: <b>${rate}</b></span>
+      </div>
+      <p style="color:var(--text-muted); font-size:0.78rem; margin-top:10px">
+        ${escapeHtml(t('autoRateNote'))}</p>
+    </div>`;
+  }
+
+  const rows = d.automations || [];
+  if (!rows.length) {
+    html += `<div class="empty-state"><div class="icon">🤖</div><h3>${escapeHtml(t('autoEmpty'))}</h3>
+      <p>${escapeHtml(cov.traces_available ? t('autoEmptyDesc') : t('autoNoTraces'))}</p></div>`;
+    host.innerHTML = html;
+    return;
+  }
+
+  html += '<div style="display:flex; flex-direction:column; gap:10px">';
+  for (const a of rows) {
+    const o = AUTO_OUTCOME[a.last_outcome] || AUTO_OUTCOME.unknown;
+    const diag = a.diagnosis;
+    let detail = '';
+    if (a.last_error) {
+      detail += `<div style="margin-top:6px; font-family:monospace; font-size:0.75rem;
+        color:var(--danger); word-break:break-word">${escapeHtml(a.last_error)}</div>`;
+    }
+    if (diag && diag.id === 'unclassified') {
+      detail += `<div style="margin-top:4px; font-size:0.78rem; color:var(--text-muted)">
+        ${escapeHtml(t('autoUnclassified'))}</div>`;
+    } else if (diag && diag.suggestion) {
+      detail += `<div style="margin-top:4px; font-size:0.8rem">
+        <b>${escapeHtml(t('autoSuggestion'))}:</b> ${escapeHtml(diag.suggestion)}
+        <div style="color:var(--text-muted); font-size:0.72rem; margin-top:2px">
+          ${escapeHtml(t('autoMatched'))}: <code>${escapeHtml(diag.matched)}</code></div></div>`;
+    }
+    const consec = a.consecutive_failures > 1
+      ? `<span class="auto-pill" style="background:rgba(244,67,54,0.12); color:var(--danger)">
+           ${escapeHtml(t('autoConsecutive', { n: a.consecutive_failures }))}</span>` : '';
+    const lastRun = a.last_run ? new Date(a.last_run).toLocaleString(_panelLocale()) : '—';
+    html += `<div class="auto-row">
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap">
+        <span class="${o.cls}">${escapeHtml(t(o.key))}</span>
+        <b style="font-size:0.9rem">${escapeHtml(a.name)}</b>
+        ${consec}
+        ${a.disabled ? `<span class="auto-pill" style="background:var(--surface2); color:var(--text-muted)">${escapeHtml(t('autoDisabled'))}</span>` : ''}
+      </div>
+      <div style="font-size:0.78rem; color:var(--text-muted); margin-top:3px">
+        ${escapeHtml(t('autoStatsLine', {
+          runs: a.runs_known, ok: a.successes, fail: a.failures, cond: a.condition_stops }))}
+        &nbsp;·&nbsp;${escapeHtml(t('autoLastRun'))}: ${escapeHtml(lastRun)}
+        ${a.entity_id ? ` &nbsp;·&nbsp; <code>${escapeHtml(a.entity_id)}</code>` : ''}
+      </div>
+      ${detail}
+    </div>`;
+  }
+  html += '</div>';
+  host.innerHTML = html;
+}
+
 function switchTab(name) {
   // Pause sysbar realtime when leaving addon tab, resume when entering
   if (name !== 'addon' && _addonRealtimeOn) {
@@ -2549,14 +2671,15 @@ function switchTab(name) {
   if (name === 'addon' && !_addonRealtimeOn) {
     _addonRealtimeOn = true; // re-arm before loadAddonTab calls _addonRealtimeTick
   }
-  ['scan','recorder','dashboard','storms','deadcode','health','fingerprint','addon','soft'].forEach(t => {
+  ['scan','recorder','dashboard','storms','deadcode','health','fingerprint','autos','addon','soft'].forEach(t => {
     const el = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
     if (el) el.style.display = t === name ? 'block' : 'none';
   });
   document.querySelectorAll('.tab').forEach((t, i) => {
-    const names = ['scan','recorder','dashboard','storms','deadcode','health','fingerprint','addon','soft'];
+    const names = ['scan','recorder','dashboard','storms','deadcode','health','fingerprint','autos','addon','soft'];
     t.classList.toggle('active', names[i] === name);
   });
+  if (name === 'autos') loadAutomationRuns();
   if (name === 'soft') loadSoftDeleted();
   if (name === 'addon') loadAddonTab();
 }
@@ -4214,6 +4337,22 @@ const I18N = {
     thDisabledAt: 'Disabled At',
     thExpiresIn: 'Auto-purge in',
     trashSummary: (p) => `${p.n} in the trash`,
+    tabAutos: '🤖 Automations',
+    autoSummaryTitle: 'Automation runs',
+    autoStatRuns: 'runs known', autoStatOk: 'succeeded', autoStatFailed: 'failed',
+    autoStatCond: 'stopped by a condition', autoStatRate: 'success rate',
+    autoRateNote: 'The success rate counts only runs whose outcome is known. A run stopped by a false condition is a normal outcome, not a failure, and is listed separately.',
+    autoOutcomeOk: 'last run OK', autoOutcomeFailed: 'last run FAILED',
+    autoOutcomeCondition: 'stopped by condition', autoOutcomeRunning: 'running',
+    autoOutcomeUnknown: 'no run recorded',
+    autoNoTraces: 'Home Assistant trace data is not available on this instance, so run outcomes are unknown - not "healthy". Traces are recorded once automations have run.',
+    autoEmpty: 'No automation runs recorded',
+    autoEmptyDesc: 'Nothing has run since Home Assistant started, or the automations have no id so their traces are not stored.',
+    autoStatsLine: (p) => `${p.runs} runs known · ${p.ok} ok · ${p.fail} failed · ${p.cond} stopped by condition`,
+    autoLastRun: 'last run', autoDisabled: 'disabled',
+    autoSuggestion: 'What usually causes this', autoMatched: 'matched',
+    autoUnclassified: 'This error was not recognised, so no suggestion is offered rather than a generic one.',
+    autoConsecutive: (p) => `${p.n} failures in a row`,
     groupFilter: 'Filter',
     groupSelect: 'Select all',
     groupSelected: (p) => `${p.n} selected`,
@@ -4678,6 +4817,22 @@ const I18N = {
     thDisabledAt: '禁用时间',
     thExpiresIn: '自动清理倒计时',
     trashSummary: (p) => `回收站里有 ${p.n} 个`,
+    tabAutos: '🤖 自动化',
+    autoSummaryTitle: '自动化运行情况',
+    autoStatRuns: '已知运行', autoStatOk: '成功', autoStatFailed: '失败',
+    autoStatCond: '因条件不满足而停止', autoStatRate: '成功率',
+    autoRateNote: '成功率只统计结局已知的运行。因条件为假而停止是正常结果，不是失败，所以单独列出。',
+    autoOutcomeOk: '上次成功', autoOutcomeFailed: '上次失败',
+    autoOutcomeCondition: '条件不满足', autoOutcomeRunning: '正在运行',
+    autoOutcomeUnknown: '没有运行记录',
+    autoNoTraces: '这个实例上没有 Home Assistant 的 trace 数据，所以运行结局是「未知」，不是「健康」。trace 要等自动化实际运行过才会有。',
+    autoEmpty: '没有自动化的运行记录',
+    autoEmptyDesc: 'Home Assistant 启动后还没有自动化运行过，或者这些自动化没有 id，trace 不会被保存。',
+    autoStatsLine: (p) => `已知 ${p.runs} 次运行 · 成功 ${p.ok} · 失败 ${p.fail} · 条件不满足 ${p.cond}`,
+    autoLastRun: '上次运行', autoDisabled: '已禁用',
+    autoSuggestion: '这类错误的常见原因', autoMatched: '命中',
+    autoUnclassified: '这个错误没有被识别，所以不给建议，而不是给一个泛泛的。',
+    autoConsecutive: (p) => `连续失败 ${p.n} 次`,
     groupFilter: '筛选',
     groupSelect: '全选',
     groupSelected: (p) => `已选中 ${p.n} 个`,

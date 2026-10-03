@@ -39,6 +39,7 @@ from .const import (
     SERVICE_SCAN,
     SERVICE_ANALYZE_FINGERPRINT,
     SERVICE_COLLECT_BASELINE,
+    SERVICE_ANALYZE_AUTOMATION_RUNS,
     SOFT_DELETE_STORE_KEY,
     STORE_KEY,
 )
@@ -517,7 +518,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Remove services
     for svc in [SERVICE_SCAN, SERVICE_PURGE, SERVICE_RESTORE, SERVICE_RESTORE_ALL,
-                 SERVICE_EMPTY_TRASH, SERVICE_GET_RESULTS,
+                 SERVICE_EMPTY_TRASH, SERVICE_GET_RESULTS, SERVICE_ANALYZE_AUTOMATION_RUNS,
                 SERVICE_ANALYZE_RECORDER, SERVICE_ANALYZE_DASHBOARD,
                 SERVICE_ANALYZE_STORMS, SERVICE_ANALYZE_DEAD_CODE, SERVICE_ANALYZE_HEALTH,
                 SERVICE_ANALYZE_ADDONS,
@@ -843,6 +844,17 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
             "soft_deleted": soft,
             "soft_delete_days": days,
         }
+
+    async def handle_analyze_automation_runs(call: ServiceCall):
+        """Report every automation's recent runs, failures and statistics.
+
+        Backed by Home Assistant's own trace component rather than by anything
+        we instrument ourselves, because a failing automation emits no event -
+        there is nothing to subscribe to.
+        """
+        from .automation_runs import AutomationRunAnalyzer  # noqa: PLC0415
+
+        return await AutomationRunAnalyzer(hass).async_analyze()
 
     async def handle_analyze_recorder(call: ServiceCall):
         """Analyze recorder DB and return optimization suggestions."""
@@ -1285,6 +1297,10 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
         )
         hass.services.async_register(
             DOMAIN, SERVICE_ANALYZE_HEALTH, handle_analyze_health,
+            schema=vol.Schema({}),
+        )
+        hass.services.async_register(
+            DOMAIN, SERVICE_ANALYZE_AUTOMATION_RUNS, handle_analyze_automation_runs,
             schema=vol.Schema({}),
         )
         hass.services.async_register(

@@ -115,6 +115,15 @@ analyze_health:
     poor signal, or abnormal disconnection rates and scores each integration.
   fields: {}
 
+analyze_automation_runs:
+  name: Analyze automation runs
+  description: >-
+    Report every automation's recent runs: which ones failed on the last run,
+    what the error was, a diagnosis where it can be identified, and run
+    statistics. Backed by Home Assistant's trace component, which keeps the
+    last 5 runs of each automation by default.
+  fields: {}
+
 analyze_fingerprint:
   name: Analyze Fingerprint
   description: >

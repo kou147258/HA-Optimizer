@@ -56,6 +56,12 @@ EVENT_PURGE_COMPLETE = f"{DOMAIN}_purge_complete"
 # Fingerprint
 FINGERPRINT_STORE_KEY = f"{DOMAIN}_fingerprint"
 SERVICE_ANALYZE_FINGERPRINT = "analyze_fingerprint"
+# Automation run health. Reads the trace component, which keeps the last 5
+# runs of every automation by default.
+SERVICE_ANALYZE_AUTOMATION_RUNS = "analyze_automation_runs"
+# Automation run health. Reads the trace component, which keeps the last 5
+# runs of every automation by default.
+SERVICE_ANALYZE_AUTOMATION_RUNS = "analyze_automation_runs"
 SERVICE_COLLECT_BASELINE = "collect_baseline"
 
 # Panel URL

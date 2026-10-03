@@ -255,7 +255,14 @@ def check_package_eol(audit: Audit) -> None:
     """
     details = []
     for name in sorted(p.name for p in (ROOT / COMPONENT).iterdir() if p.is_file()):
-        raw = git_bytes("show", f"HEAD:{PREFIX}{name}")
+        try:
+            raw = git_bytes("show", f"HEAD:{PREFIX}{name}")
+        except Exception as exc:  # noqa: BLE001
+            # A brand-new, uncommitted file. Reporting that is useful; raising
+            # would abort the whole audit, which is how a check becomes worse
+            # than no check - the first run after adding a file died here.
+            details.append(f"{name}: not in HEAD yet ({str(exc)[:60]})")
+            continue
         crlf = raw.count(b"\r\n")
         lf = raw.count(b"\n") - crlf
         if crlf and lf:
