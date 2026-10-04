@@ -351,6 +351,64 @@ CASES = [
                           "diagnosis": None}],
      }]},
 
+    # Triggered after the last stored run. The trace bucket only reaches disk
+    # when HA stops, so this is the ordinary state for most of the day - and
+    # it is the one that was reported: run something, watch the timestamp not
+    # move.
+    {"fn": "renderAutomationRuns",
+     "label": "a run more recent than the stored trace says so",
+     "expect": "contains",
+     "contains": ["the stored run only reaches", "missing a key the service requires"],
+     "args": [{"__el__": "automationRunsHost"}, {
+        "coverage": {"traces_available": True, "noteKey": "autoCoverPartial",
+                     "observed": {"buckets": 6, "runs": 13},
+                     "unmatched_runs": 0},
+        "summary": {"runs_known": 13, "successes": 5, "failures": 8,
+                    "aborted": 0, "not_triggered": 0, "success_rate": 38.5,
+                    "untraced": 0, "total_automations": 1, "failing": []},
+        "automations": [{"automation_id": "automation.22222",
+                          "entity_id": "automation.22222", "name": "22222",
+                          "disabled": True, "traced": True,
+                          "runs_known": 2, "failures": 2, "aborted": 0,
+                          "not_triggered": 0, "successes": 0,
+                          "last_outcome": "failed",
+                          "last_run": "2026-10-04T03:11:04+00:00",
+                          "last_triggered": "2026-10-04T08:26:00+00:00",
+                          "consecutive_failures": 2,
+                          "last_error": "required key not provided",
+                          "diagnosis": {"id": "missing_key",
+                                        "key": "autoDiag_missing_key",
+                                        "matched": "required key not provided"}}],
+     }]},
+
+    # The other direction: the stored run is the newer fact, so there is
+    # nothing to explain and the notice must stay away.
+    {"fn": "renderAutomationRuns",
+     "label": "the stored run is the newer fact, so nothing is explained",
+     "expect": "contains",
+     "not_contains": ["the stored run only reaches"],
+     "args": [{"__el__": "automationRunsHost"}, {
+        "coverage": {"traces_available": True, "noteKey": "autoCoverPartial",
+                     "observed": {"buckets": 6, "runs": 13},
+                     "unmatched_runs": 0},
+        "summary": {"runs_known": 13, "successes": 5, "failures": 8,
+                    "aborted": 0, "not_triggered": 0, "success_rate": 38.5,
+                    "untraced": 0, "total_automations": 1, "failing": []},
+        "automations": [{"automation_id": "automation.22222",
+                          "entity_id": "automation.22222", "name": "22222",
+                          "disabled": True, "traced": True,
+                          "runs_known": 2, "failures": 2, "aborted": 0,
+                          "not_triggered": 0, "successes": 0,
+                          "last_outcome": "failed",
+                          "last_run": "2026-10-04T08:26:00+00:00",
+                          "last_triggered": "2026-10-04T03:11:04+00:00",
+                          "consecutive_failures": 2,
+                          "last_error": "required key not provided",
+                          "diagnosis": {"id": "missing_key",
+                                        "key": "autoDiag_missing_key",
+                                        "matched": "required key not provided"}}],
+     }]},
+
     # ── the scan table and the group strip: state-driven, not payload-driven ─
     {"fn": "renderTable",
      "label": "rows, pagination and the selection bar",

@@ -144,6 +144,24 @@ CASES = [
        '    "toast", "buildLangMenu", "buildThemeMenu", "_applyTranslations",')],
      "no longer writes to the document", True),
 
+    # (g) The two clocks. `last_run` is the trace bucket, which Home Assistant
+    # only writes to disk when it stops; `last_triggered` is live. Taking
+    # `last_run` first showed a run from five minutes ago with a timestamp from
+    # before it, which reads as "nothing happened".
+    ("(g) the newer run is again hidden behind the stored trace",
+     [(PANEL,
+       "    const traceBehind = _trigOk && _runOk && _trigAt > _runAt;\n",
+       "    const traceBehind = false;\n")],
+     "stored run only reaches", True),
+
+    # (h) The diagnosis goes back to reading a field the backend no longer sends.
+    # Nothing renders, and the common cause silently disappears - which is what
+    # the panel looked like before any of this.
+    ("(h) the diagnosis is read off a field that is not sent",
+     [(PANEL, "    } else if (diag && diag.key) {", "    } else if (diag && diag.suggestion) {"),
+      (PANEL, "${escapeHtml(t(diag.key))}", "${escapeHtml(diag.suggestion)}")],
+     "missing a key the service requires", True),
+
     # The control for (c): the identical defect with the old swallow put back is
     # silent again. If this ever goes red, (c) is no longer proving what it
     # claims to prove - the throw would be reaching the harness by another route.

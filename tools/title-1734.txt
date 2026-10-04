@@ -1,0 +1,1 @@
+1.7.34 — the baseline stops averaging days it cannot vouch for, and the top-writer tag stops being blind until 20:00

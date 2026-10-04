@@ -58,12 +58,12 @@ CASES = [
      "            for pattern in rule[\"match\"]:\n"
      "                m = re.search(pattern, low)\n"
      "                if m:\n"
-     "                    return {\"id\": rule[\"id\"], \"suggestion\": rule[\"suggestion\"],\n"
+     "                    return {\"id\": rule[\"id\"], \"key\": rule[\"key\"],\n"
      "                            \"matched\": m.group(0), \"pattern\": pattern,\n"
      "                            \"error\": error_text}",
      "            for needle in rule[\"match\"].split(\"|\"):\n"
      "                if needle in low:\n"
-     "                    return {\"id\": rule[\"id\"], \"suggestion\": rule[\"suggestion\"],\n"
+     "                    return {\"id\": rule[\"id\"], \"key\": rule[\"key\"],\n"
      "                            \"matched\": needle, \"error\": error_text}",
      "automation_runs.py"),
 

@@ -215,7 +215,7 @@ async def _observe_storage(hass, observed: dict[str, Any]) -> None:
 
 
 # ── failure diagnosis ──────────────────────────────────────────────────────
-# Each rule is a dict of (id, match, kind, suggestion). `match` holds REGULAR
+# Each rule is a dict of (id, match, kind, key). `match` holds REGULAR
 # EXPRESSIONS, and that is the second bug this table had: they were written
 # with `.*` in them and then compared with `needle in text`, so every pattern
 # containing a wildcard could never match anything. The `entity_missing` rule
@@ -232,9 +232,7 @@ DIAGNOSES: list[dict[str, Any]] = [
                   r"has no attribute", r"template render",
                   r"executing template", r"rendering template",
                   r"has no key", r"jinja2?\b.*error"),
-        "suggestion": "A template evaluated to an error. Test it in the template editor "
-                      "with the same variables the trigger supplies - the trace's "
-                      "changed_variables tab shows what the trigger actually passed.",
+        "key": "autoDiag_template",
     },
     {
         "id": "entity_missing",
@@ -242,49 +240,35 @@ DIAGNOSES: list[dict[str, Any]] = [
                   r"has not been loaded", r"entity .* not found",
                   r"not found in the entity registry", r"unknown service",
                   r"unknown entity"),
-        "suggestion": "The action names a service or entity that does not exist. Either "
-                      "the integration providing it is not loaded, or the name changed "
-                      "when the entity_id was renamed.",
+        "key": "autoDiag_entity_missing",
     },
     {
         "id": "unavailable",
         "match": (r"is unavailable", r"\bunavailable\b",
                   r"was aborted because the entity"),
-        "suggestion": "The action targeted an entity that was unavailable at the time. "
-                      "Usually the device dropped off the network; check it before "
-                      "changing the automation.",
+        "key": "autoDiag_unavailable",
     },
     {
         "id": "auth",
         "match": (r"unauthorized", r"requires admin", r"not authorized",
                   r"permission denied"),
-        "suggestion": "The action needs an administrator context. Scripts and automations "
-                      "run as the user that started them, so a service now restricted to "
-                      "admins will fail for a non-admin start.",
+        "key": "autoDiag_auth",
     },
     {
         "id": "missing_key",
         "match": (r"required key not provided", r"key '[^']+' not provided",
                   r"required argument '[^']+'"),
-        "suggestion": "An action called a service with a data payload that is missing a "
-                      "key the service requires - the error names the key and where it "
-                      "was expected, so compare the action's data block with that "
-                      "service's schema rather than with the integration's docs. On a "
-                      "service that takes a raw body, the payload is usually nested "
-                      "differently from what the action passes.",
+        "key": "autoDiag_missing_key",
     },
     {
         "id": "timeout",
         "match": (r"timeout", r"timed out"),
-        "suggestion": "The run exceeded its time limit. Usually a wait_template loop or a "
-                      "service that is slow to answer; check the step's duration in the "
-                      "trace timeline.",
+        "key": "autoDiag_timeout",
     },
     {
         "id": "no_response",
         "match": (r"no response", r"no longer accepting"),
-        "suggestion": "The target stopped responding mid-run. This is usually the device, "
-                      "not the automation.",
+        "key": "autoDiag_no_response",
     },
 ]
 
@@ -308,7 +292,7 @@ def diagnose(error_text: str | None) -> dict[str, Any] | None:
             for pattern in rule["match"]:
                 m = re.search(pattern, low)
                 if m:
-                    return {"id": rule["id"], "suggestion": rule["suggestion"],
+                    return {"id": rule["id"], "key": rule["key"],
                             "matched": m.group(0), "pattern": pattern,
                             "error": error_text}
     except re.error as exc:
@@ -316,11 +300,11 @@ def diagnose(error_text: str | None) -> dict[str, Any] | None:
         # raised, so a typo in a diagnosis costs one classification, not the
         # page.
         _LOGGER.warning("Diagnosis pattern is not valid: %s", exc)
-        return {"id": "unclassified", "suggestion": "", "matched": "",
+        return {"id": "unclassified", "key": "", "matched": "",
                 "error": error_text}
     # Unknown is reported as unknown. A generic "check the logs" on an error we
     # could not classify is the advice equivalent of a wrong answer.
-    return {"id": "unclassified", "suggestion": "", "matched": "", "error": error_text}
+    return {"id": "unclassified", "key": "", "matched": "", "error": error_text}
 
 
 # ── run classification ─────────────────────────────────────────────────────

@@ -2790,17 +2790,36 @@ function renderAutomationRuns(host, d) {
     if (diag && diag.id === 'unclassified') {
       detail += `<div style="margin-top:4px; font-size:0.78rem; color:var(--text-muted)">
         ${escapeHtml(t('autoUnclassified'))}</div>`;
-    } else if (diag && diag.suggestion) {
+    } else if (diag && diag.key) {
       detail += `<div style="margin-top:4px; font-size:0.8rem">
-        <b>${escapeHtml(t('autoSuggestion'))}:</b> ${escapeHtml(diag.suggestion)}
+        <b>${escapeHtml(t('autoSuggestion'))}:</b> ${escapeHtml(t(diag.key))}
         <div style="color:var(--text-muted); font-size:0.72rem; margin-top:2px">
           ${escapeHtml(t('autoMatched'))}: <code>${escapeHtml(diag.matched)}</code></div></div>`;
     }
     const consec = a.consecutive_failures > 1
       ? `<span class="auto-pill" style="background:rgba(244,67,54,0.12); color:var(--danger)">
            ${escapeHtml(t('autoConsecutive', { n: a.consecutive_failures }))}</span>` : '';
-    const lastRun = a.last_run ? new Date(a.last_run).toLocaleString(_panelLocale())
-      : (a.last_triggered ? new Date(a.last_triggered).toLocaleString(_panelLocale()) : '—');
+    // Two clocks, and the newer one was the one being hidden. `last_run` comes
+    // from the trace bucket, which Home Assistant only writes to disk when it
+    // stops, so it lags behind. `last_triggered` comes from the state object and
+    // is live. Taking `last_run` first meant an automation run five minutes ago
+    // was labelled with a timestamp from before it - which reads as "nothing
+    // happened" when something plainly did, and there is no way to tell that
+    // apart from a stale page.
+    const _trigAt = a.last_triggered ? new Date(a.last_triggered) : null;
+    const _runAt = a.last_run ? new Date(a.last_run) : null;
+    const _trigOk = _trigAt && !isNaN(_trigAt);
+    const _runOk = _runAt && !isNaN(_runAt);
+    const _newest = (_trigOk && _runOk) ? (_trigAt > _runAt ? _trigAt : _runAt)
+      : (_runOk ? _runAt : (_trigOk ? _trigAt : null));
+    const lastRun = _newest ? _newest.toLocaleString(_panelLocale()) : '—';
+    const traceBehind = _trigOk && _runOk && _trigAt > _runAt;
+    if (traceBehind) {
+      detail += `<div style="margin-top:4px; font-size:0.78rem; color:var(--text-muted)">
+        ${escapeHtml(t('autoTraceBehind', {
+          triggered: _trigAt.toLocaleString(_panelLocale()),
+          stored: _runAt.toLocaleString(_panelLocale()) }))}</div>`;
+    }
     // last_triggered is the fact that exists for EVERY automation; the run
     // outcome only exists for ones with a stored trace. So the sentence below
     // is told apart by whether last_triggered is there: without it, "nothing
@@ -4682,6 +4701,14 @@ const I18N = {
     autoEmptyDesc: 'Nothing has run since Home Assistant started.',
     autoStatsLine: (p) => `${p.runs} runs known · ${p.ok} ok · ${p.fail} failed · ${p.aborted} ended early${p.untrig ? ` · ${p.untrig} trigger declined` : ''}`,
     autoLastRun: 'last run', autoDisabled: 'disabled',
+    autoDiag_template: 'A template evaluated to an error. Test it in the template editor with the same variables the trigger supplies — the trace\'s changed_variables tab shows what the trigger actually passed.',
+    autoDiag_entity_missing: 'The action names a service or entity that does not exist. Either the integration providing it is not loaded, or the name changed when the entity_id was renamed.',
+    autoDiag_unavailable: 'The action targeted an entity that was unavailable at the time. Usually the device dropped off the network; check it before changing the automation.',
+    autoDiag_auth: 'The action needs an administrator context. Scripts and automations run as the user that started them, so a service now restricted to admins will fail for a non-admin start.',
+    autoDiag_missing_key: 'An action called a service with a data payload that is missing a key the service requires — the error names the key and where it was expected, so compare the action\'s data block with that service\'s schema rather than with the integration\'s docs. On a service that takes a raw body, the payload is usually nested differently from what the action passes.',
+    autoDiag_timeout: 'The run exceeded its time limit. Usually a wait_template loop or a service that is slow to answer; check the step\'s duration in the trace timeline.',
+    autoDiag_no_response: 'The target stopped responding mid-run. This is usually the device, not the automation.',
+    autoTraceBehind: 'Triggered {triggered}, but the stored run only reaches {stored}. Home Assistant writes traces to disk only when it stops, so a run from the last few hours is not in there yet — it appears after a restart.',
     autoSuggestion: 'What usually causes this', autoMatched: 'matched',
     autoUnclassified: 'This error was not recognised, so no suggestion is offered rather than a generic one.',
     autoConsecutive: (p) => `${p.n} failures in a row`,
@@ -5209,6 +5236,14 @@ const I18N = {
     autoEmptyDesc: 'Home Assistant 启动后还没有自动化运行过。',
     autoStatsLine: (p) => `已知 ${p.runs} 次运行 · 成功 ${p.ok} · 失败 ${p.fail} · 提前结束 ${p.aborted}${p.untrig ? ` · 触发未命中 ${p.untrig}` : ''}`,
     autoLastRun: '上次运行', autoDisabled: '已禁用',
+    autoDiag_template: '模板求值出错。用触发器实际传入的变量在模板编辑器里测试——trace 的 changed_variables 页签能看到触发器究竟传了什么。',
+    autoDiag_entity_missing: '动作里调用的服务或实体不存在。要么提供它的集成没加载，要么 entity_id 改名时名称变了。',
+    autoDiag_unavailable: '动作执行时目标实体不可用。通常是设备掉线了；先查设备，再考虑改自动化。',
+    autoDiag_auth: '该动作需要管理员身份。脚本和自动化以启动它们的用户身份运行，所以一个现在限制为管理员才能用的服务，非管理员启动时就会失败。',
+    autoDiag_missing_key: '某个动作调用服务时传的数据里缺了服务必需的键——报错里已经指明了是哪个键、期望出现在哪里，所以应该拿动作的数据块去对服务的 schema，而不是对集成文档。对于接受原始 body 的服务，数据嵌套的层级通常和动作传的不一样。',
+    autoDiag_timeout: '这次运行超出了时间限制。通常是 wait_template 循环，或者某个服务响应很慢；去 trace 时间线里看那一步的耗时。',
+    autoDiag_no_response: '目标在运行途中停止响应。这通常是设备的问题，不是自动化的问题。',
+    autoTraceBehind: '已于 {triggered} 触发，但已存储的运行记录只到 {stored}。HA 只在停止时把 trace 写盘，所以最近几小时的运行还不在里面——重启后就会出现。',
     autoSuggestion: '这类错误的常见原因', autoMatched: '命中',
     autoUnclassified: '这个错误没有被识别，所以不给建议，而不是给一个泛泛的。',
     autoConsecutive: (p) => `连续失败 ${p.n} 次`,

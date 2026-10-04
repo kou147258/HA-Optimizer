@@ -287,6 +287,13 @@ TOOL_CHECKS: list[tuple[str, str, list[str]]] = [
      ["test_python_shadowing.py"]),
     ("source.no_shadowing.cp", "the shadowing check can still fail",
      ["counterproof_python_shadowing.py"]),
+    # The seven common-cause explanations were English prose in the backend and
+    # the panel printed them verbatim. `t()` with a DYNAMIC key is the one call
+    # shape no param-shape check can read, so it needs its own.
+    ("auto.diagnosis_i18n", "every diagnosis is a key, and every key is translated",
+     ["test_automation_i18n.py"]),
+    ("auto.diagnosis_i18n.cp", "prose, or a key in one language only, is caught",
+     ["counterproof_automation_i18n.py"]),
     # The harness's own trust boundary: an injected defect plus a lying exit
     # code must not read as a pass. It also asserts a clean tree still passes,
     # so it cannot be satisfied by a harness that calls everything red.
