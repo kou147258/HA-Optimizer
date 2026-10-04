@@ -14,6 +14,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
@@ -623,23 +624,57 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
             # entity it must not touch. Those were recorded but never disabled,
             # so their records come back out; leaving them would put a live
             # entity in the trash.
+            # What the engine refused on its own rules. `failed` is NOT
+            # in here: the engine's broad except also catches a raise after
+            # a registry write, so an entity it disabled and then failed
+            # on would lose its record - the untracked state this change
+            # exists to prevent. Everything here was left untouched, so
+            # their records are stale.
             refused = set(result.get("skipped_high_risk", [])) | {
                 y["entity_id"] for y in result.get("yaml_manual", [])
-            } | {f["entity_id"] for f in result.get("failed", [])}
+            } | set(result.get("already_gone", []))
+            # And anything the engine did not leave disabled. Checked
+            # against the registry rather than inferred, so a crash
+            # between the batch write and this line cannot leave a record
+            # for an entity that is in use - which the expiry job would
+            # otherwise have deleted from the registry, silently and for
+            # good.
+            ent_reg = er.async_get(hass)
+            for eid in entity_ids:
+                entry = ent_reg.async_get(eid)
+                if entry is not None and not entry.disabled:
+                    refused.add(eid)
             if refused:
                 await store.async_remove_soft_deleted(sorted(refused))
+                _LOGGER.info(
+                    "Dropped %d stale trash record(s) for entities that were "
+                    "never disabled, or that are enabled again: %s",
+                    len(refused), sorted(refused),
+                )
         else:
             result = await data["engine"].async_purge_entities(
                 entity_ids, soft_delete=False, on_left_disabled=_record,
             )
 
         if result.get("untracked"):
-            # The one state with no way back: disabled in the registry, no
-            # trash record. Nothing in this integration can restore it, so the
-            # user is told in the response rather than left to find out.
+            # The one state with no way back: disabled in the registry, with no
+            # trash record. Nothing in this integration can restore it. The
+            # key travels in the service response - which the panel does not
+            # currently read - and a repairs issue is raised so it reaches the
+            # UI, because a log line is not something anyone reads afterwards.
             _LOGGER.error(
                 "%d entity/entities are disabled with no trash record and cannot be "
                 "restored from here: %s", len(result["untracked"]), result["untracked"],
+            )
+            _async_raise_issue(
+                hass, "purge_untracked", severity="error",
+                entities=list(result["untracked"]),
+                description=(
+                    "These are disabled in the entity registry with no record "
+                    "in the trash, so nothing in this integration can restore "
+                    "them. Re-enable them in the registry, or remove the rows "
+                    "by hand."
+                ),
             )
 
         if result.get("disabled_only"):

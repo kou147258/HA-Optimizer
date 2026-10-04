@@ -115,12 +115,13 @@ CONSTE = purge_engine.er.RegistryEntryDisabler
 
 
 class FakeRegEntry:
-    def __init__(self, device_class=None, config_entry_id="ce_1", platform="integration"):
+    def __init__(self, device_class=None, config_entry_id="ce_1", platform="integration",
+                 disabled=False):
         self.original_device_class = device_class
         self.device_class = device_class
         self.config_entry_id = config_entry_id
         self.platform = platform
-        self.disabled = False
+        self.disabled = disabled
 
 
 class FakeEntReg:
@@ -171,11 +172,28 @@ else:
     check("purge engine uses the shared SAFETY_DEVICE_CLASSES",
           purge_engine._SAFETY_CLASSES is SAFETY_DEVICE_CLASSES)
 
-# a normal entity must still be deletable
-reg = FakeEntReg(FakeRegEntry(device_class="temperature", config_entry_id="ce_2"))
+# a normal entity must still be deletable — and "normal" now means DISABLED,
+# because a hard delete only applies to something in the trash. The fixture did
+# not set it, so it was asserting that a hard delete removes an entity that was
+# never disabled: which is what the new guard forbids, and what the expiry job
+# used to do to entities a user had re-enabled by hand.
+reg = FakeEntReg(FakeRegEntry(device_class="temperature", config_entry_id="ce_2",
+                             disabled=True))
 engine = purge_engine.PurgeEngine(FakeHass(reg))
 asyncio.run(engine.async_purge_entities(["sensor.normal"], soft_delete=False))
-check("still deletes an ordinary entity", reg.removed == ["sensor.normal"], str(reg.removed))
+check("still deletes an ordinary disabled entity",
+      reg.removed == ["sensor.normal"], str(reg.removed))
+
+# and an entity that is enabled again must be left alone entirely
+reg2 = FakeEntReg(FakeRegEntry(device_class="temperature", config_entry_id="ce_3",
+                               disabled=False))
+engine2 = purge_engine.PurgeEngine(FakeHass(reg2))
+res2 = asyncio.run(engine2.async_purge_entities(["sensor.back"], soft_delete=False))
+check("refuses to delete an entity that is enabled again",
+      reg2.removed == [] and res2["not_disabled"] == ["sensor.back"],
+      f"removed={reg2.removed} not_disabled={res2.get('not_disabled')}")
+check("and it is not reported as a successful deletion either",
+      "sensor.back" not in res2["success"], str(res2["success"]))
 
 
 # ── RISK 3: automation/script deletion must tell the truth ──────────────────
@@ -231,7 +249,24 @@ check("expiry path logs at warning level",
       re_warn := ("_LOGGER.warning(" in init_src.split("async def _async_check_soft_delete_expiry")[1][:4000]))
 check("entities that could not be removed stay tracked",
       "still_tracked" in init_src.split("async def _async_check_soft_delete_expiry")[1][:4000])
-_purge_body = init_src.split("def handle_purge")[1][:2500]
+def _fn_source(src: str, name: str) -> str:
+    """The body of one function, taken by AST rather than by a character window.
+
+    It was `split(...)[1][:4000]`, and 4000 characters stopped reaching the end of
+    `handle_purge` once the function grew - so the check silently started
+    reading half a function and failed for a reason that had nothing to do with
+    what it was checking. A window is a time bomb; an AST node is not.
+    """
+    import ast as _ast
+    tree = _ast.parse(src)
+    for node in _ast.walk(tree):
+        if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and node.name == name:
+            seg = _ast.get_source_segment(src, node) or ""
+            return "\n".join(l.rstrip() for l in seg.splitlines())
+    return ""
+
+
+_purge_body = _fn_source(init_src, "handle_purge")   # AST, not a char window
 # The invariant is "an entity the engine left disabled is in the trash". It used
 # to be satisfied by a batch write here, and it is now satisfied earlier and
 # more safely: the engine reports each entity the moment it disables it, and the
@@ -258,7 +293,7 @@ check("the engine records every path that leaves an entity disabled",
 # (invisible, unrestorable). The per-entity version was also correct, and cost
 # one awaited disk write per entity, because Store.async_save does not coalesce
 # - only async_delay_save does.
-_purge = init_src.split("def handle_purge")[1][:4000]
+_purge = _fn_source(init_src, "handle_purge")
 _soft = _purge.split("if soft:")[1].split("else:")[0] if "if soft:" in _purge else ""
 check("a soft purge records the batch before it disables anything",
       "async_add_soft_deleted(entity_ids)" in _soft

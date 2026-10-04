@@ -66,6 +66,11 @@ class PurgeEngine:
             "yaml_manual": [],
             "disabled_only": [],       # delete FAILED, only disabled — kept tracked
             "skipped_high_risk": [],   # device class forbids removing it
+            # Left enabled by hand, so the record in the trash is stale. Never
+            # a success and never a failure: nothing was removed and nothing is
+            # broken. The caller drops the record, because a record for an
+            # entity that is in use is worse than no record at all.
+            "not_disabled": [],
             # Not in the registry, and not removable by domain either. Nothing
             # was deleted, so this is never a success on its own; whether it is
             # a failure or a stale record depends on which path asked, so the
@@ -224,7 +229,24 @@ class PurgeEngine:
                             results["untracked"] = results.get("untracked", [])
                             results["untracked"].append(entity_id)
                 else:
-                    # Hard delete
+                    # Hard delete. Only of something that is actually disabled.
+                    #
+                    # A trash record outlives the disabled state: the ordinary
+                    # reaction to "this tool disabled my entity" is to re-enable
+                    # it in Home Assistant's own registry screen, and nothing
+                    # dropped the record. The unattended expiry job then removed
+                    # that live, enabled entity from the registry, which is
+                    # silent, unrecoverable, and would have happened to exactly
+                    # the entities a user cares about most. Verified by running
+                    # the real engine and the real job against a stub registry.
+                    if not entry.disabled:
+                        results["not_disabled"].append(entity_id)
+                        _LOGGER.warning(
+                            "Not deleting %s: it is enabled. A record for it is in "
+                            "the trash but the entity is back in use, so this tool "
+                            "will not remove it.", entity_id,
+                        )
+                        continue
                     ent_reg.async_remove(entity_id)
                     results["success"].append(entity_id)
                     _LOGGER.info("Hard-deleted entity: %s", entity_id)
@@ -374,6 +396,13 @@ class PurgeEngine:
         every tick. In the ordinary purge path the same situation is a failure,
         because nothing was deleted there; that is why the two paths differ, and
         why the distinction is made here rather than in the engine.
+
+        A record whose entity is back in use is stale in the same way and for
+        the same reason, so it is reported the same way - under a key of its
+        own, NOT under `success`, because nothing was removed and the caller
+        announces `success` as "permanently removed N entity/entities. This
+        cannot be undone." The caller drops the record and leaves the entity
+        alone.
         """
         result = await self.async_purge_entities(entity_ids, soft_delete=False)
         gone = list(result.get("already_gone", []))
@@ -382,7 +411,7 @@ class PurgeEngine:
             result["already_gone"] = gone
             result["failed"] = [f for f in result.get("failed", [])
                                 if f.get("entity_id") not in set(gone)]
-        return result
+        return dict(result, stale_records=list(result.get("not_disabled", [])))
 
     async def _remove_by_domain(self, entity_id: str) -> str:
         """Remove an automation/script through its config entry.

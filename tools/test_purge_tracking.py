@@ -39,11 +39,14 @@ FAIL_ON = "sensor.boom"
 
 
 class _Entry:
-    def __init__(self, entity_id):
+    def __init__(self, entity_id, disabled=False):
         self.entity_id = entity_id
         self.domain = entity_id.split(".")[0]
         self.platform = "demo"
-        self.disabled = False
+        # Defaults to enabled, because that is the state a user re-enabling by
+        # hand leaves behind - and the state the engine now refuses to delete.
+        # A test that wants a hard delete has to say so.
+        self.disabled = disabled
         self.disabled_by = None
         self.config_entry_id = "cfg"
         self.device_class = None
@@ -53,8 +56,8 @@ class _Entry:
 
 
 class _Reg:
-    def __init__(self, ids, fail_remove=False):
-        self._entries = {i: _Entry(i) for i in ids}
+    def __init__(self, ids, fail_remove=False, disabled=False):
+        self._entries = {i: _Entry(i, disabled=disabled) for i in ids}
         self.disabled_now: list[str] = []
         self.removed_now: list[str] = []
         # Makes `_remove_by_domain` fall back to disabling, which is the only
@@ -195,8 +198,9 @@ out2 = asyncio.run(spec.PurgeEngine(_Hass()).async_purge_entities(
 check("a clean batch records every entity once, in order",
       recorded2 == ["sensor.a", "sensor.b", "sensor.c"], f"got {recorded2}")
 
-# Hard delete is unaffected: nothing is disabled, so nothing is recorded.
-reg3, recorded3 = _Reg(["sensor.h"]), []
+# Hard delete of something that removes cleanly: nothing is left disabled, so
+# nothing is recorded and the removal is reported normally.
+reg3, recorded3 = _Reg(["sensor.h"], disabled=True), []
 er.async_get = lambda hass: reg3
 
 
@@ -208,6 +212,19 @@ asyncio.run(spec.PurgeEngine(_Hass()).async_purge_entities(
     ["sensor.h"], soft_delete=False, on_left_disabled=_record3))
 check("a hard delete records nothing, because nothing was disabled",
       recorded3 == [] and reg3.removed_now == ["sensor.h"], f"got {recorded3}")
+
+# And the refusal, which is the defect the audit found: an entity that is
+# ENABLED - which is what a user re-enabling by hand leaves behind - is not
+# deleted at all, and is not reported as a success either.
+reg4 = _Reg(["sensor.on"], fail_remove=True)
+er.async_get = lambda hass: reg4
+out4b = asyncio.run(spec.PurgeEngine(_Hass()).async_purge_entities(
+    ["sensor.on"], soft_delete=False, on_left_disabled=_record3))
+check("a hard delete refuses an entity that is enabled again",
+      out4b.get("not_disabled") == ["sensor.on"] and out4b["success"] == []
+      and reg4.removed_now == [],
+      f"not_disabled={out4b.get('not_disabled')} success={out4b['success']} "
+      f"removed={reg4.removed_now}")
 
 # And the engine is still callable without the callback, so its own tests and
 # any other caller keep working.

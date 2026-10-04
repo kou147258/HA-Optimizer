@@ -247,7 +247,13 @@ TOOL_CHECKS: list[tuple[str, str, list[str]]] = [
     ("identity.rename", "registry identity behaviour", ["test_rename_identity.py"]),
     ("identity.rename.cp", "identity checks can still fail", ["counterproof_rename_identity.py"]),
     ("source.trace_join", "traces are read the way HA stores them", ["test_trace_join.py"]),
-    ("source.trace_join.cp", "trace-join checks can still fail", ["counterproof_trace_join.py"]),
+    # Every other check imports or execs ONE file. This one loads the whole
+    # component the way Home Assistant does, as a package, so a module broken
+    # for all of them and fine here is still caught.
+    ("package.imports", "the whole package loads as Home Assistant loads it",
+     ["test_package_imports.py"]),
+    ("package.imports.cp", "the package-load check can still fail",
+     ["counterproof_package_imports.py"]),    ("source.trace_join.cp", "trace-join checks can still fail", ["counterproof_trace_join.py"]),
     # It was on disk for releases and never listed here, so it had been failing
     # silently - which is how a stub went stale against the code it was checking.
     ("source.untraced_lists", "automations are listed even with no traces",
