@@ -3279,8 +3279,10 @@ function renderRecorderResults(d, ts) {
         <div style="max-height:320px; overflow-y:auto">
           <table style="width:100%; border-collapse:collapse; font-size:0.82rem">
             <thead><tr>
-              <th style="text-align:left; padding:4px 8px; color:var(--text-muted)">Entity</th>
-              <th style="text-align:right; padding:4px 8px; color:var(--text-muted)">Records</th>
+              <th style="text-align:left; padding:4px 8px; color:var(--text-muted)"
+                data-i18n="colEntity">Entity</th>
+              <th style="text-align:right; padding:4px 8px; color:var(--text-muted)"
+                data-i18n="colRecords">Records</th>
             </tr></thead>
             <tbody>
               ${(d.top_writers || []).map(r => `
@@ -3299,8 +3301,10 @@ function renderRecorderResults(d, ts) {
         <div style="max-height:320px; overflow-y:auto">
           <table style="width:100%; border-collapse:collapse; font-size:0.82rem">
             <thead><tr>
-              <th style="text-align:left; padding:4px 8px; color:var(--text-muted)">Entity</th>
-              <th style="text-align:right; padding:4px 8px; color:var(--text-muted)">Records</th>
+              <th style="text-align:left; padding:4px 8px; color:var(--text-muted)"
+                data-i18n="colEntity">Entity</th>
+              <th style="text-align:right; padding:4px 8px; color:var(--text-muted)"
+                data-i18n="colRecords">Records</th>
               <th style="text-align:right; padding:4px 8px; color:var(--text-muted)">${t('recorderValues')}</th>
             </tr></thead>
             <tbody>
@@ -4217,8 +4221,17 @@ function renderFingerprintResults(d, ts) {
     <div style="background:var(--surface2); border-left:3px solid var(--warning); border-radius:10px; padding:12px 18px; margin-bottom:16px; font-size:0.83rem; line-height:1.7; color:var(--text-muted)">
       <div style="font-weight:700; color:var(--text); margin-bottom:6px">${t('fpExcludedTitle')}</div>
       ${t('fpExcludedBody', baselineStored, baselineDays)}
-      <ul style="margin:6px 0 0 18px">${excludedKeys.map(k =>
-        `<li>${escapeHtml(k)}: ${Number(baselineExcluded[k]) || 0}</li>`).join('')}</ul>
+      <ul style="margin:6px 0 0 18px">${excludedKeys.map(k => {
+        const row = baselineExcluded[k] || {};
+        // tVal, then escapeHtml. Both, and the order matters: tVal() resolves
+        // the key and interpolates `params`, and those params are whatever the
+        // backend sent. Rendering them unescaped puts a backend string into
+        // the markup as markup - the same hole the area id had, one layer over.
+        const label = row.key
+          ? escapeHtml(tVal({ key: row.key, params: row.params || {} }))
+          : escapeHtml(k);
+        return `<li>${label}: ${Number(row.count) || 0}</li>`;
+      }).join('')}</ul>
     </div>` : '';
 
   let html = banner + explainHtml + excludedHtml;
@@ -4726,6 +4739,11 @@ const I18N = {
     filterCatEntity: 'Entity', filterCatHelper: 'Helper',
     filterCatAutomation: 'Automation', filterCatScript: 'Script',
     connConnecting: 'Connecting…',
+    colEntity: 'Entity', colRecords: 'Records',
+    fpExclUnmarked: 'measured before windows were recorded',
+    fpExclNoLength: 'no window length recorded',
+    fpExclOldRule: 'measured by window rule v{version}, not v{current}',
+    fpExclDstDay: 'a {hours}h day (DST)',
     autoSuggestion: 'What usually causes this', autoMatched: 'matched',
     autoUnclassified: 'This error was not recognised, so no suggestion is offered rather than a generic one.',
     autoConsecutive: (p) => `${p.n} failures in a row`,
@@ -5266,6 +5284,11 @@ const I18N = {
     filterCatEntity: '实体', filterCatHelper: '辅助实体',
     filterCatAutomation: '自动化', filterCatScript: '脚本',
     connConnecting: '连接中…',
+    colEntity: '实体', colRecords: '记录数',
+    fpExclUnmarked: '测量时还没有记录窗口',
+    fpExclNoLength: '没有记录窗口长度',
+    fpExclOldRule: '用 v{version} 窗口规则测的，不是 v{current}',
+    fpExclDstDay: '{hours} 小时的一天（夏令时）',
     autoSuggestion: '这类错误的常见原因', autoMatched: '命中',
     autoUnclassified: '这个错误没有被识别，所以不给建议，而不是给一个泛泛的。',
     autoConsecutive: (p) => `连续失败 ${p.n} 次`,

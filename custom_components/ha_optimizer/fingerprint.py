@@ -679,13 +679,21 @@ class FingerprintAnalyzer:
             if k != today_str
         ]
         history: list[dict] = []
-        excluded: dict[str, int] = {}
+        excluded: dict[str, dict[str, Any]] = {}
         for day in candidates:
             comparable, why = _window_is_comparable(day)
             if comparable:
                 history.append(day)
             else:
-                excluded[why] = excluded.get(why, 0) + 1
+                # Keyed by the KEY, not the sentence: the panel has to be able
+                # to translate it, and it could not translate a reason that was
+                # spelled out here. `fpExclUnmarked` covers two shapes of the
+                # same cause, so the count of a key is the count of days.
+                k = why["key"] if isinstance(why, dict) else why
+                excluded.setdefault(k, {"key": k, "count": 0, "params": {}})
+                excluded[k]["count"] += 1
+                if isinstance(why, dict) and why.get("params"):
+                    excluded[k]["params"] = dict(why["params"])
 
         baseline_days = len(history)
         anomalies = self._detector.detect(today_metrics, history)
@@ -1009,25 +1017,29 @@ def _ts_to_local(ts: Any) -> datetime | None:
         return None
 
 
-def _window_is_comparable(day: dict) -> tuple[bool, str]:
+def _window_is_comparable(day: dict) -> tuple[bool, Any]:
     """Can this stored day be averaged with a fresh measurement? Why not?
 
-    Returns (comparable, reason). The reason is not for a log line - it is
-    counted and reported to the panel, so "why is my baseline short" has an
-    answer on the screen instead of only in this file.
+    Returns (comparable, reason), where the reason is an i18n KEY or a
+    `{"key", "params"}` pair - never a sentence. It is counted and shown to the
+    user, and the panel can only translate a key; a reason spelled out here
+    arrives in a Chinese panel as English, which is the one thing this is
+    supposed to prevent.
     """
     window = day.get("window")
     if not isinstance(window, dict):
         # The days written before the window was recorded. Unknowable, so out.
-        return False, "measured before windows were recorded"
+        return False, "fpExclUnmarked"
     version = window.get("version")
     if version != MEASUREMENT_WINDOW_VERSION:
-        return False, f"measured by window rule v{version}, not v{MEASUREMENT_WINDOW_VERSION}"
+        return False, {"key": "fpExclOldRule",
+                       "params": {"version": version,
+                                  "current": MEASUREMENT_WINDOW_VERSION}}
     hours = window.get("hours")
     if not isinstance(hours, (int, float)):
-        return False, "no window length recorded"
+        return False, "fpExclNoLength"
     if abs(float(hours) - 24.0) > DST_WINDOW_TOLERANCE_H:
-        return False, f"a {hours}h day (DST)"
+        return False, {"key": "fpExclDstDay", "params": {"hours": hours}}
     return True, ""
 
 

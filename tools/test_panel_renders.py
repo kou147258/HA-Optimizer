@@ -268,16 +268,33 @@ CASES = [
     {"fn": "renderFingerprintResults",
      "label": "stored days left out of the average are explained, and escaped",
      "expect": "contains",
-     "contains": ["a 23.0h day (DST)",
-                  "measured before windows were recorded"],
+     "contains": ["a 23h day (DST)", "measured before windows were recorded"],
      "not_contains": ["<img src=x onerror=alert(1)>"],
      "args": [{
         "confidence": 20, "confidence_label": {"key": "fp_confidence_very_low",
                                                "params": {"days": 0}},
         "baseline_days": 0, "baseline_stored_days": 31,
-        "baseline_excluded": {"a 23.0h day (DST)": 1,
-                              "measured before windows were recorded": 30,
-                              "<img src=x onerror=alert(1)>": 2},
+        # The exclusion reasons arrive as {key, count, params} - keys, because
+        # the panel can only translate a key and the backend's reasons go
+        # through tVal(). The payload is in that shape deliberately: in the
+        # older `{sentence: count}` shape the keys here were English sentences
+        # and tVal() had nothing to look up, so the case was checking an escape
+        # of text the panel would never receive.
+        #
+        # `hours` is 23.0 and the marker below is "23h", not "23.0h": JS renders
+        # the number 23.0 as "23", and a marker written from Python's repr
+        # would have failed against correct code - which is the sort of green
+        # that means nothing.
+        "baseline_excluded": {
+          "fpExclDstDay": {"key": "fpExclDstDay", "count": 1,
+                           "params": {"hours": 23.0}},
+          "fpExclUnmarked": {"key": "fpExclUnmarked", "count": 30, "params": {}},
+          # The probe lives on its own reason, so escaping a DST hour does not
+          # also change the normal text the marker is looking for.
+          "fpExclOldRule": {"key": "fpExclOldRule", "count": 2,
+                            "params": {"version": "<img src=x onerror=alert(1)>",
+                                       "current": 2}},
+        },
         "anomalies": [], "sparklines": {},
         "today_metrics": {"date": "2026-10-04", "hours_elapsed": 10.6,
                           "partial": True, "total_writes": 1522,

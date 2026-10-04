@@ -118,10 +118,12 @@ CASES = [
     # and the assertion was satisfied by nothing at all.
     ("(d) the exclusion reasons reach the markup unescaped",
      [(PANEL,
-       "        `<li>${escapeHtml(k)}: ${Number(baselineExcluded[k]) || 0}</li>`)"
-       ".join('')}</ul>\n",
-       "        `<li>${k}: ${Number(baselineExcluded[k]) || 0}</li>`)"
-       ".join('')}</ul>\n")],
+       "        const label = row.key\n"
+       "          ? escapeHtml(tVal({ key: row.key, params: row.params || {} }))\n"
+       "          : escapeHtml(k);",
+       "        const label = row.key\n"
+       "          ? tVal({ key: row.key, params: row.params || {} })\n"
+       "          : k;")],
      "present but must not be", True),
     # (e) The DOM-writer census is the check that makes the coverage number
     # honest - "14 of 14 render entry points" was 14 out of 50 functions that

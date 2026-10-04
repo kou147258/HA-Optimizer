@@ -107,16 +107,24 @@ check("a day stamped by the current rule is comparable", ok, why)
 
 ok, why = W(day(100, window=False))
 check("a day with no window at all is excluded", not ok, f"it was accepted: {why!r}")
+# `why` is a key now, so "names the cause" means the key says which cause.
+# Asserting on English text would assert on the exact thing being removed.
 check("and the reason names the cause, not just 'no'",
-      "before windows were recorded" in why, why)
+      why == "fpExclUnmarked", f"{why!r}")
 
 ok, why = W(day(100, version=1))
 check("a day measured by an older window rule is excluded", not ok, why)
-check("and the reason says which rule produced it",
-      "v1" in why and f"v{fp.MEASUREMENT_WINDOW_VERSION}" in why, why)
+# isinstance, because the counter-proof for this file injects a string reason -
+# and a check that raises while examining the defect reports nothing at all.
+check("and the reason carries which rule produced it",
+      isinstance(why, dict) and why.get("key") == "fpExclOldRule"
+      and why.get("params", {}).get("version") == 1, f"{why!r}")
 
 ok, why = W(day(100, hours=23.0))
 check("a 23h DST day is excluded from a 24h average", not ok, why)
+check("and carries the length that excluded it",
+      isinstance(why, dict) and why.get("key") == "fpExclDstDay"
+      and why.get("params", {}).get("hours") == 23.0, f"{why!r}")
 ok, why = W(day(100, hours=25.0))
 check("a 25h DST day is excluded from a 24h average", not ok, why)
 ok, why = W(day(100, hours=23.6))
@@ -187,8 +195,25 @@ check("unstamped, old-rule and DST days are all left out of the average",
       rep2["baseline_days"] == kept,
       f"baseline_days={rep2['baseline_days']}, stored={rep2['baseline_stored_days']}")
 check("each dropped day is reported with its own reason",
-      sorted(rep2["baseline_excluded"].values()) == [1, 1, 1]
+      sorted(v["count"] for v in rep2["baseline_excluded"].values()) == [1, 1, 1]
       and len(rep2["baseline_excluded"]) == 3, rep2["baseline_excluded"])
+# The reason is a translation KEY plus params, never a sentence: the panel
+# prints whatever arrives, and it can only translate a key. A reason spelled
+# out in this module reaches a Chinese panel as English.
+# Defensive on the type, because a check that raises while examining a defect
+# reports nothing at all - and the defect here IS a value of the wrong shape.
+def _key_of(v):
+    return v.get("key") if isinstance(v, dict) else v
+
+
+check("every excluded reason is a key the panel can translate",
+      bool(rep2["baseline_excluded"]) and all(
+          isinstance(_key_of(v), str) and str(_key_of(v)).startswith("fpExcl")
+          for v in rep2["baseline_excluded"].values()),
+      rep2["baseline_excluded"])
+check("and none of them is a sentence",
+      not any(" " in str(_key_of(v)) for v in rep2["baseline_excluded"].values()),
+      "a key with a space in it is a sentence wearing a key's name")
 check("the stored count still reports what the store holds",
       rep2["baseline_stored_days"] == rep["baseline_stored_days"] + 3,
       f"{rep2['baseline_stored_days']} vs {rep['baseline_stored_days']}")
