@@ -10,6 +10,7 @@ any of them stops holding.
 """
 from __future__ import annotations
 
+import ast
 import asyncio
 import sys
 import types
@@ -243,31 +244,107 @@ check("YAML automation: reported as manual work, not deleted",
 # ── RISK 1: unattended auto-purge must be announced ─────────────────────────
 print("\nRISK 1 — automatic trash expiry must not be silent")
 init_src = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
-def _fn_source(src: str, name: str) -> str:
-    """The body of one function, taken by AST rather than by a character window.
+engine_src = (COMPONENT / "purge_engine.py").read_text(encoding="utf-8")
+
+
+def _fn_nodes(src: str, name: str) -> list:
+    """Every function with this name, located by AST rather than by a window.
 
     It was `split(...)[1][:4000]`, and 4000 characters stopped reaching the end of
     `handle_purge` once the function grew - so the check silently started
     reading half a function and failed for a reason that had nothing to do with
     what it was checking. A window is a time bomb; an AST node is not.
     """
-    import ast as _ast
-    tree = _ast.parse(src)
-    for node in _ast.walk(tree):
-        if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and node.name == name:
-            seg = _ast.get_source_segment(src, node) or ""
-            return "\n".join(l.rstrip() for l in seg.splitlines())
+    tree = ast.parse(src)
+    return [n for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name]
+
+
+def _fn_source(src: str, name: str) -> str:
+    """The body of one function as raw text - for a FAILURE MESSAGE only.
+
+    `get_source_segment` hands back the lines with their COMMENTS INCLUDED, so a
+    substring matched in here can be satisfied by a comment, and this file
+    guards an irreversible job: a commented-out guard and a live one are
+    indistinguishable to a text match, and the guard is the whole point. It was
+    exactly that - commenting out the soft-purge batch record left every check
+    below green, because the comment still read `async_add_soft_deleted(
+    entity_ids)`. So nothing here asserts on this string any more: the
+    assertions read node shapes via _fn_nodes, and this is only ever used to
+    show what the code actually was.
+    """
+    segs = [ast.get_source_segment(src, n) or "" for n in _fn_nodes(src, name)]
+    return "\n".join(l.rstrip() for s in segs for l in s.splitlines())
+
+
+def _dotted(node) -> str:
+    """`a.b.c` for a Name/Attribute chain, the bare attr when the base is a
+    subscript (`data["engine"].async_purge_entities` -> `async_purge_entities`),
+    and '' for anything else."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _dotted(node.value)
+        return f"{base}.{node.attr}" if base else node.attr
     return ""
 
 
-expiry = _fn_source(init_src, "_async_check_soft_delete_expiry")
+def _matches(name: str, callee: str) -> bool:
+    """A call to `callee`, however the receiver is spelled."""
+    return name == callee or name.endswith("." + callee)
+
+
+def _calls(node) -> list:
+    """Every call inside a node, as (callee name, ast.Call)."""
+    return [(_dotted(c.func), c) for c in ast.walk(node) if isinstance(c, ast.Call)]
+
+
+def _has_call(node, callee: str) -> bool:
+    return any(_matches(name, callee) for name, _ in _calls(node))
+
+
+def _empty() -> ast.Module:
+    """A node with nothing in it, so a missing function FAILS the checks below
+    instead of raising AttributeError and taking the whole file with it."""
+    return ast.Module(body=[], type_ignores=[])
+
+
+for _name in ("_async_check_soft_delete_expiry", "handle_purge"):
+    _found = _fn_nodes(init_src, _name)
+    check(f"{_name} is declared exactly once", len(_found) == 1, f"found {len(_found)}")
+
+expiry_nodes = _fn_nodes(init_src, "_async_check_soft_delete_expiry")
+expiry = expiry_nodes[0] if len(expiry_nodes) == 1 else _empty()
+expiry_src = _fn_source(init_src, "_async_check_soft_delete_expiry")
+
 check("expiry path creates a persistent notification",
-      "persistent_notification.async_create" in expiry)
+      _has_call(expiry, "persistent_notification.async_create"),
+      "no live call to it in the function body"
+      + (f"; the body starts: {expiry_src[:120]!r}" if expiry_src else ""))
 check("expiry path logs at warning level",
-      re_warn := ("_LOGGER.warning(" in expiry))
+      re_warn := _has_call(expiry, "_LOGGER.warning"))
+# Assigned AND announced. A comment mentioning the name satisfies neither, and
+# so does a name that is only assigned: the function builds `still_tracked` and
+# then branches on it TWICE - once to log what could not be removed, once to add
+# a line to the notification. Only the first is the announcement, so that is the
+# branch this asserts on: a check that accepted either one passed when the
+# logging branch was dead and the text-only branch was alive.
+_tracked = [n for n in ast.walk(expiry)
+            if isinstance(n, (ast.Assign, ast.AnnAssign))
+            and any(isinstance(t, ast.Name) and t.id == "still_tracked"
+                    for t in ([*n.targets] if isinstance(n, ast.Assign) else [n.target]))]
+_announced = [n for n in ast.walk(expiry)
+              if isinstance(n, ast.If) and _dotted(n.test) == "still_tracked"
+              and any(_matches(name, "_LOGGER.warning") for name, _ in _calls(n))]
 check("entities that could not be removed stay tracked",
-      "still_tracked" in expiry)
-_purge_body = _fn_source(init_src, "handle_purge")   # AST, not a char window
+      bool(_tracked) and bool(_announced),
+      "no assignment to still_tracked, or no `if still_tracked:` that logs what "
+      "could not be removed (a branch that only adds a line to the notification "
+      "body is not an announcement)")
+
+_purge_nodes = _fn_nodes(init_src, "handle_purge")
+_purge_node = _purge_nodes[0] if len(_purge_nodes) == 1 else _empty()
+_purge_body = _fn_source(init_src, "handle_purge")   # AST-located, not a window
 # The invariant is "an entity the engine left disabled is in the trash". It used
 # to be satisfied by a batch write here, and it is now satisfied earlier and
 # more safely: the engine reports each entity the moment it disables it, and the
@@ -276,16 +353,31 @@ _purge_body = _fn_source(init_src, "handle_purge")   # AST, not a char window
 # asserting the call site here would have pinned a mechanism that is no longer
 # the right one, which is how an assertion outlives the design it was written
 # for. The invariant is asserted instead, and the mechanism by the engine check.
+_untracked = [c for name, c in _calls(_purge_node)
+              if name == "result.get" and c.args
+              and isinstance(c.args[0], ast.Constant) and c.args[0].value == "untracked"]
+_recorded = [k.value for c in ast.walk(_purge_node) if isinstance(c, ast.Call)
+             for k in c.keywords
+             if k.arg == "on_left_disabled" and isinstance(k.value, ast.Name)
+             and k.value.id == "_record"]
 check("purge service keeps disabled_only entities in the trash",
-      'result.get("untracked")' in _purge_body
-      and "on_left_disabled=_record" in _purge_body,
+      bool(_untracked) and bool(_recorded),
       "the handler must record each entity as the engine disables it, and say "
-      "so when a record could not be written")
+      "so when a record could not be written"
+      + (f"; the body starts: {_purge_body[:120]!r}" if _purge_body else ""))
+
+# The engine's own side of that. This was a whole-file count of the literal text
+# "_record_if_callbacked(", which a comment naming the helper inflates and a
+# removed call site deflates - so it counted text, not trash records. Count the
+# CALL NODES instead: one definition and at least two call sites.
+_engine_defs = _fn_nodes(engine_src, "_record_if_callbacked")
+_sites = sorted(c.lineno for c in ast.walk(ast.parse(engine_src))
+                if isinstance(c, ast.Call) and _dotted(c.func) == "_record_if_callbacked")
 check("the engine records every path that leaves an entity disabled",
-      (COMPONENT / "purge_engine.py").read_text(encoding="utf-8")
-      .count("_record_if_callbacked(") >= 3,
-      "a hard delete that could only disable disables just as a soft delete "
-      "does, and needs the same trash record")
+      len(_engine_defs) == 1 and len(_sites) >= 2,
+      f"defined {len(_engine_defs)}x, called from {len(_sites)} site(s) at lines "
+      f"{_sites}; a hard delete that could only disable disables just as a soft "
+      f"delete does, and needs the same trash record")
 
 # The soft path records the whole batch BEFORE the engine disables anything.
 # The order is the invariant, not the mechanism: a crash between the two must
@@ -294,23 +386,41 @@ check("the engine records every path that leaves an entity disabled",
 # (invisible, unrestorable). The per-entity version was also correct, and cost
 # one awaited disk write per entity, because Store.async_save does not coalesce
 # - only async_delay_save does.
-_purge = _fn_source(init_src, "handle_purge")
-_soft = _purge.split("if soft:")[1].split("else:")[0] if "if soft:" in _purge else ""
+_soft_if = next((n for n in _purge_node.body
+                 if isinstance(n, ast.If) and _dotted(n.test) == "soft"), None)
+_soft_stmts = list(_soft_if.body) if _soft_if is not None else []
+
+
+def _first_call(stmts: list, callee: str) -> tuple:
+    """(index of the first statement calling it, that call), (-1, None)."""
+    for i, st in enumerate(stmts):
+        for name, c in _calls(st):
+            if _matches(name, callee):
+                return i, c
+    return -1, None
+
+
+_i_rec, _rec_call = _first_call(_soft_stmts, "async_add_soft_deleted")
+_i_purge, _purge_call = _first_call(_soft_stmts, "async_purge_entities")
 check("a soft purge records the batch before it disables anything",
-      "async_add_soft_deleted(entity_ids)" in _soft
-      and _soft.index("async_add_soft_deleted(entity_ids)")
-      < _soft.index("async_purge_entities("),
-      "the record must be written first; see the comment in handle_purge")
+      _i_rec >= 0 and _i_purge >= 0 and _i_rec < _i_purge
+      and any(isinstance(a, ast.Name) and a.id == "entity_ids"
+              for a in (_rec_call.args if _rec_call is not None else [])),
+      f"record at statement {_i_rec}, purge at {_i_purge}"
+      + (f" (as {_dotted(_purge_call.func)})" if _purge_call is not None else "")
+      + "; the record must be written first - see the comment in handle_purge")
+_i_out, _out_call = _first_call(_soft_stmts, "async_remove_soft_deleted")
 check("and the entities the engine refused are taken back out",
-      "async_remove_soft_deleted(sorted(refused))" in _soft,
-      "a safety device class or a YAML entity was recorded but never disabled")
+      _i_out >= 0 and any(isinstance(n, ast.Name) and n.id == "refused"
+                          for a in (_out_call.args if _out_call is not None else [])
+                          for n in ast.walk(a)),
+      "a safety device class or a YAML entity was recorded but never disabled, "
+      "so its record has to come back out")
 
 # `from __future__ import annotations` turns annotations into strings, and the
 # docstring explaining the fix still names the dead keys — so inspect the AST,
 # which sees only real code.
-import ast  # noqa: E402
-
-pe_tree = ast.parse((COMPONENT / "purge_engine.py").read_text(encoding="utf-8"))
+pe_tree = ast.parse(engine_src)
 # drop every string that is a docstring; keep the rest as "live" code strings
 docstrings = set()
 for node in ast.walk(pe_tree):
