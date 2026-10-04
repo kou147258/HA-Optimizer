@@ -149,9 +149,19 @@ def annotate(results: list[dict], measurement: dict[str, Any]) -> dict[str, Any]
     for r in results:
         stats = by_entity.get(r.get("entity_id"))
         if stats is None:
-            r["writes_30d"] = None if measured else None
-            r["distinct_states_30d"] = None
+            # No rows for this entity. That is not the same as "not measured" -
+            # the query ran and succeeded, and it found nothing, which is a
+            # measurement of zero. `None if measured else None` gave up the
+            # difference entirely: it evaluated to None either way, so every
+            # candidate that had simply never written came back "not measured"
+            # while the run alongside it said it had. On a live instance that
+            # left every rollup at `measured: 0`, which is what kept the
+            # per-area write line from ever rendering.
+            r["writes_30d"] = 0 if measured else None
+            r["distinct_states_30d"] = 0 if measured else None
             r["measured"] = measured
+            if measured:
+                r["writes_per_day"] = 0.0
             continue
         writes = stats["writes"]
         distinct = max(stats["distinct_states"], 1)

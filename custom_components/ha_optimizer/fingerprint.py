@@ -218,9 +218,22 @@ class DailyProfiler:
                 """)).fetchall()
                 metrics["unavail_events"] = int(sum(r[1] for r in rows_restart))
                 metrics["unavail_entities"] = len(rows_restart)
+                # A `states` row can carry a NULL entity_id: the entity
+                # was removed from the registry and the recorder kept the
+                # history. Those rows are real writes and are counted in
+                # every total, but they belong to no entity - and passing
+                # one on put the word "null" on the panel. They are counted
+                # instead, and named, because `active_entities` is a
+                # COUNT(DISTINCT entity_id) and so excludes them: an
+                # instance whose recent writes are mostly orphaned rows
+                # shows "0 active entities" beside a large write total and
+                # nothing says why.
+                orphans = [r for r in rows_restart if not r[0]]
                 metrics["unstable_entities"] = [
-                    {"entity_id": r[0], "count": int(r[1])} for r in rows_restart[:5]
-                ]
+                    {"entity_id": r[0], "count": int(r[1])}
+                    for r in rows_restart if r[0]
+                ][:5]
+                metrics["unavail_orphan_events"] = int(sum(r[1] for r in orphans))
 
                 uniq_row = session.execute(text(f"""
                     SELECT COUNT(DISTINCT entity_id) FROM states
@@ -752,9 +765,22 @@ class FingerprintAnalyzer:
                 metrics["unavail_events"] = _extrapolate_to_day(raw_unavail, hours_elapsed)
                 metrics["unavail_events_raw"] = raw_unavail
                 metrics["unavail_entities"] = len(rows_restart)
+                # A `states` row can carry a NULL entity_id: the entity
+                # was removed from the registry and the recorder kept the
+                # history. Those rows are real writes and are counted in
+                # every total, but they belong to no entity - and passing
+                # one on put the word "null" on the panel. They are counted
+                # instead, and named, because `active_entities` is a
+                # COUNT(DISTINCT entity_id) and so excludes them: an
+                # instance whose recent writes are mostly orphaned rows
+                # shows "0 active entities" beside a large write total and
+                # nothing says why.
+                orphans = [r for r in rows_restart if not r[0]]
                 metrics["unstable_entities"] = [
-                    {"entity_id": r[0], "count": int(r[1])} for r in rows_restart[:5]
-                ]
+                    {"entity_id": r[0], "count": int(r[1])}
+                    for r in rows_restart if r[0]
+                ][:5]
+                metrics["unavail_orphan_events"] = int(sum(r[1] for r in orphans))
 
                 uniq_row = session.execute(text(f"""
                     SELECT COUNT(DISTINCT entity_id) FROM states
