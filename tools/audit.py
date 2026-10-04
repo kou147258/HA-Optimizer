@@ -279,6 +279,14 @@ TOOL_CHECKS: list[tuple[str, str, list[str]]] = [
      ["test_check_tools.py"]),
     ("tools.reach_verdict.cp", "the unreachable-tail check can still fail",
      ["counterproof_check_tools.py"]),
+    # Every service handler closes over the ConfigEntry parameter `entry`. A
+    # local of the same name in one of them made Python treat EVERY `entry` in
+    # that function as local, including the two reads above it, so every soft
+    # purge died with a bare HTTP 500 and nothing in the panel said why.
+    ("source.no_shadowing", "no function reads a name before it is assigned",
+     ["test_python_shadowing.py"]),
+    ("source.no_shadowing.cp", "the shadowing check can still fail",
+     ["counterproof_python_shadowing.py"]),
     # The harness's own trust boundary: an injected defect plus a lying exit
     # code must not read as a pass. It also asserts a clean tree still passes,
     # so it cannot be satisfied by a harness that calls everything red.

@@ -641,8 +641,14 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry):
             # good.
             ent_reg = er.async_get(hass)
             for eid in entity_ids:
-                entry = ent_reg.async_get(eid)
-                if entry is not None and not entry.disabled:
+                # NOT `entry`. That is the ConfigEntry this whole closure
+                # reads, and naming a local the same thing makes Python treat
+                # EVERY `entry` in this function as local - including the two
+                # reads above, which then raise UnboundLocalError and take the
+                # whole purge down with a bare HTTP 500. `reg_entry` is what
+                # purge_engine.py calls the same object.
+                reg_entry = ent_reg.async_get(eid)
+                if reg_entry is not None and not reg_entry.disabled:
                     refused.add(eid)
             if refused:
                 await store.async_remove_soft_deleted(sorted(refused))
