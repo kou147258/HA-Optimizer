@@ -286,37 +286,68 @@ TOOL_CHECKS: list[tuple[str, str, list[str]]] = [
 # "7/10 passed" plus three FAIL lines and then `sys.exit(0)` was reported here
 # as `ok  pass`. Every check's own verdict line was decorative.
 #
-# The rule is read off what the tools actually print, not guessed - the first
-# version of it guessed and turned nine genuinely-green checks red, because a
+# The rule is read off what the tools actually print, not guessed. The first
+# version guessed and turned nine genuinely-green checks red, because a
 # counter-proof legitimately PRINTS `FAIL` lines: that is the injected defect's
-# report, indented, and its own last line says the defect was caught. So:
+# report, indented, and its own last line says the defect was caught.
 #
-#   * the verdict is the last line that LOOKS like one, because log output can
-#     follow it (an engine's own warnings do);
-#   * a `FAIL` at column 0 is a verdict and a failure; an indented one is data;
-#   * `N/M passed` has to satisfy N == M. That is what closes the hole: no
-#     amount of wording rescues 7/10.
+# Which means the meaning of an indented `FAIL` is not a property of the output
+# at all - it is a property of WHAT KIND OF TOOL this is, and only the caller
+# knows that. Every check in the directory reports its failed assertions as
+# `  FAIL  <name>`, so the "indented is data" exemption covered precisely what
+# real checks emit, and a check that printed `10/10 passed` + `PASSED` next to
+# three indented FAILs was read as a pass. The harness knows the kind from the
+# file it is running, so it says so:
+#
+#   * a CHECK: any `FAIL` line, indented or not, is a failed assertion;
+#   * a COUNTER-PROOF: a `FAIL` at column 0 is its own verdict, and an
+#     indented one is the defect it was asked to catch;
+#   * either way the verdict is the last line that LOOKS like one and is not a
+#     failure, because log output can follow it (an engine's own warnings do);
+#   * `N/M passed` has to satisfy N == M.
 VERDICT_SHAPE = re.compile(
     r"^(?:PASSED\b|OK\b|\d+\s*/\s*\d+\s*passed\b|.*\ball\b.*\bpassed\b)", re.I)
 COUNTED = re.compile(r"(\d+)\s*/\s*(\d+)\s*passed\b", re.I)
+A_FAILURE = re.compile(r"^\s*(?:FAILED|FAIL)\b")
 
 
-def tool_verdict(out: str) -> tuple[bool, str]:
+def is_failure_line(ln: str, counterproof: bool) -> bool:
+    """Is this line the tool saying something did not pass?
+
+    The one asymmetry is indentation, and it is only an exemption for a
+    counter-proof: there the indented FAIL is the defect under test, echoed on
+    purpose. A check has no such thing - its indented FAILs are its results.
+    """
+    return bool(A_FAILURE.match(ln)) and not (counterproof and ln[:1].isspace())
+
+
+def tool_verdict(out: str, counterproof: bool = False) -> tuple[bool, str]:
     """Did this tool say it passed? Returns (believed_pass, evidence)."""
     lines = [ln.rstrip() for ln in out.splitlines() if ln.strip()]
-    # A verdict at column 0 that is a failure settles it immediately.
     for ln in lines:
-        if ln.startswith("FAILED") or re.match(r"^FAIL\b", ln):
+        if is_failure_line(ln, counterproof):
             return False, f"reported a failure: {ln.strip()[:60]!r}"
+    # A count that does not add up is the tool admitting that something failed,
+    # and it is an admission wherever it appears - not only in the line that
+    # wins the verdict search. An honest `7/10 passed` followed by an
+    # overriding `PASSED` is still an admission. A counter-proof echoes the
+    # mutated check's whole output, including its count, so its indented copy
+    # is data there; its own lines are its own.
+    for ln in lines:
+        if counterproof and ln[:1].isspace():
+            continue
+        m = COUNTED.search(ln)
+        if m and m.group(1) != m.group(2):
+            return False, f"its own count does not add up: {ln.strip()[:60]!r}"
+    # A line that is itself a failure is never the verdict, however much it
+    # looks like one: `  FAIL  missing the all checks passed line` matches the
+    # "all ... passed" shape, and quoting it as the passing verdict is the one
+    # reading of this rule that reports a failure as a pass.
     verdict = next((ln.strip() for ln in reversed(lines)
-                    if VERDICT_SHAPE.match(ln.strip())), None)
+                    if VERDICT_SHAPE.match(ln.strip())
+                    and not A_FAILURE.match(ln)), None)
     if verdict is None:
         return False, "printed no verdict line at all"
-    m = COUNTED.search(verdict)
-    if m and m.group(1) != m.group(2):
-        return False, f"its own count does not add up: {verdict[:60]!r}"
-    if verdict.upper().startswith("FAILED"):
-        return False, f"its verdict line was: {verdict[:60]!r}"
     return True, verdict
 
 
@@ -325,7 +356,8 @@ def check_tool(audit: Audit, cid: str, name: str, argv: list[str]) -> None:
     r = subprocess.run([*exe, str(TOOLS / argv[0])], capture_output=True,
                        text=True, encoding="utf-8", errors="replace", cwd=str(ROOT))
     out = (r.stdout or "") + (r.stderr or "")
-    claimed_pass, evidence = tool_verdict(out)
+    claimed_pass, evidence = tool_verdict(
+        out, counterproof=Path(argv[0]).name.startswith("counterproof_"))
     details = []
     if r.returncode != 0:
         details = [ln.strip(" -│") for ln in out.splitlines()

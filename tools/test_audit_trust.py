@@ -70,8 +70,21 @@ CASES: list[tuple[str, list[tuple[str, str, str]], bool]] = [
     ("the check simply fails (the control)",
      [("custom_components/ha_optimizer/store.py", *DEFECT)],
      True),
+    # The one that crossed the FIRST version of the new rule, and it crossed it
+    # because that rule called an indented `FAIL` data. Every check in the
+    # directory reports its failed assertions as `  FAIL  <name>`, so the
+    # exemption covered exactly what real checks emit. This tool lies
+    # consistently - the count agrees with itself, the verdict says PASSED, the
+    # exit is 0 - and next to three indented FAILs it was read as a pass.
+    ("the check makes its own count agree and still exits 0",
+     [("custom_components/ha_optimizer/store.py", *DEFECT),
+      ("tools/test_store_records.py", COUNT_LINE,
+       'print(f"{len(results)}/{len(results)} passed")'),
+      ("tools/test_store_records.py", VERDICT_LINE, 'print("PASSED")'),
+      ("tools/test_store_records.py", EXIT_LINE, "sys.exit(0)")],
+     True),
     # Nothing is broken here. The harness must say so. Without this case a
-    # harness that reported everything as failed would pass the other three.
+    # harness that reported everything as failed would pass the other cases.
     ("an unmutated tree is still reported as passing",
      [],
      False),
@@ -94,6 +107,51 @@ def build(t: Path, patches: list[tuple[str, str, str]]) -> None:
                 f"  anchor: {old!r}\n"
                 f"  -> a patch that does not apply is a test that cannot fail")
         p.write_bytes(text.replace(old, new, 1).replace("\n", "\r\n").encode("utf-8"))
+
+
+# ── the rule itself, on outputs no scratch tree can be asked to produce ─────
+# The end-to-end cases above need a whole tree per case and can only inject what
+# a real tool does. These pin the decisions directly, including the ones that
+# depend on WHAT KIND of tool is speaking - which is not in the output at all,
+# and is the thing the previous version of the rule got wrong.
+sys.path.insert(0, str(ROOT / "tools"))
+import audit  # noqa: E402
+
+A_CHECK = (f"  PASS  a read does not expose the live record\n"
+           f"  FAIL  a window of 0 day(s) expires nothing\n"
+           f"  FAIL  a window of -1 day(s) expires nothing\n")
+A_COUNTERPROOF = (f"  FAIL  a window of 0 day(s) expires nothing\n"
+                  f"  PASS  the counter-proof caught it\n")
+
+RULES = [
+    # The reported bypass: the count agrees with itself, the verdict says
+    # PASSED, and three assertions are visibly red.
+    ("an indented FAIL is a failed assertion in a CHECK",
+     audit.tool_verdict(A_CHECK + "10/10 passed\nPASSED\n"), False),
+    # The same output from a counter-proof: those FAILs are the defect it was
+    # asked to catch, and its own verdict speaks for it.
+    ("the same lines are data in a COUNTER-PROOF",
+     audit.tool_verdict(A_COUNTERPROOF + "1/1 passed\n"
+                        "PASSED: every injected defect was caught, and named\n",
+                        counterproof=True), True),
+    # A failure line matches the "all ... passed" shape, so it can be mistaken
+    # for the verdict and quoted as the thing that passed.
+    ("a failure line is never the verdict",
+     audit.tool_verdict(A_COUNTERPROOF + "  FAIL  missing the all checks "
+                        "passed line\nPASSED\n", counterproof=True), True),
+    # The reason the verdict is the LAST such line: an engine's own output can
+    # follow the summary, and it must not overturn it.
+    ("log output after the verdict does not overturn it",
+     audit.tool_verdict("10/10 passed\nPASSED\nWARNING: recorder is busy\n"), True),
+    # And the two ways a check can be a failure without printing one.
+    ("a count that does not add up is a failure",
+     audit.tool_verdict("7/10 passed\nPASSED\n"), False),
+    ("silence is not consent",
+     audit.tool_verdict("  PASS  everything is fine\n"), False),
+]
+for label, (believed, _evidence), expect_pass in RULES:
+    check(label, believed == expect_pass,
+          f"expected believed_pass={expect_pass}, got {believed}")
 
 
 for label, patches, expect_red in CASES:
