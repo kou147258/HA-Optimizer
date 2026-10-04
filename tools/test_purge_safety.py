@@ -243,12 +243,6 @@ check("YAML automation: reported as manual work, not deleted",
 # ── RISK 1: unattended auto-purge must be announced ─────────────────────────
 print("\nRISK 1 — automatic trash expiry must not be silent")
 init_src = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
-check("expiry path creates a persistent notification",
-      "persistent_notification.async_create" in init_src)
-check("expiry path logs at warning level",
-      re_warn := ("_LOGGER.warning(" in init_src.split("async def _async_check_soft_delete_expiry")[1][:4000]))
-check("entities that could not be removed stay tracked",
-      "still_tracked" in init_src.split("async def _async_check_soft_delete_expiry")[1][:4000])
 def _fn_source(src: str, name: str) -> str:
     """The body of one function, taken by AST rather than by a character window.
 
@@ -266,6 +260,13 @@ def _fn_source(src: str, name: str) -> str:
     return ""
 
 
+expiry = _fn_source(init_src, "_async_check_soft_delete_expiry")
+check("expiry path creates a persistent notification",
+      "persistent_notification.async_create" in expiry)
+check("expiry path logs at warning level",
+      re_warn := ("_LOGGER.warning(" in expiry))
+check("entities that could not be removed stay tracked",
+      "still_tracked" in expiry)
 _purge_body = _fn_source(init_src, "handle_purge")   # AST, not a char window
 # The invariant is "an entity the engine left disabled is in the trash". It used
 # to be satisfied by a batch write here, and it is now satisfied earlier and
