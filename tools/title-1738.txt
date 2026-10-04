@@ -1,0 +1,1 @@
+1.7.38 — 1.7.37's hard-delete fix used an API that does not exist; this one reads the real one
