@@ -268,6 +268,13 @@ TOOL_CHECKS: list[tuple[str, str, list[str]]] = [
     ("source.recorder_sql", "SQL columns exist in the recorder schema", ["test_recorder_sql.py"]),
     ("source.recorder_sql.cp", "recorder-SQL checks can still fail",
      ["counterproof_recorder_sql.py"]),
+    # A stored baseline day and this morning were being averaged as if they
+    # were the same measurement, and the top-writer tag compared a 06:00 figure
+    # against a whole-day peak - so it could not fire before twenty hours in.
+    ("fingerprint.windows", "a baseline day and this morning are one measurement",
+     ["test_fingerprint_windows.py"]),
+    ("fingerprint.windows.cp", "the window checks can still fail",
+     ["counterproof_fingerprint_windows.py"]),
     ("tools.reach_verdict", "no tool ends its run before its own assertions",
      ["test_check_tools.py"]),
     ("tools.reach_verdict.cp", "the unreachable-tail check can still fail",

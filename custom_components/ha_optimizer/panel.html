@@ -4148,6 +4148,12 @@ function renderFingerprintResults(d, ts) {
 
   const anomalies = d.anomalies || [];
   const baselineDays = d.baseline_days || 0;
+  // What the store holds, and what is not in the average. Both come from
+  // the service: a day measured over a window this version cannot name is
+  // left out rather than averaged in, and the reasons are counted so they
+  // can be said out loud below.
+  const baselineStored = d.baseline_stored_days || 0;
+  const baselineExcluded = d.baseline_excluded || {};
   const confidence = d.confidence || 0;
   const confidenceLabel = d.confidence_label || '';
   const today = d.today_metrics || {};
@@ -4172,7 +4178,19 @@ function renderFingerprintResults(d, ts) {
       ${t('fpWhatBody', baselineDays)}
     </div>`;
 
-  let html = banner + explainHtml;
+  const excludedKeys = Object.keys(baselineExcluded);
+  // Only when something really was left out, and carrying the number it was
+  // left out by. A shorter baseline with no stated reason reads as a quiet
+  // week, and that is precisely the reading this must not allow.
+  const excludedHtml = excludedKeys.length ? `
+    <div style="background:var(--surface2); border-left:3px solid var(--warning); border-radius:10px; padding:12px 18px; margin-bottom:16px; font-size:0.83rem; line-height:1.7; color:var(--text-muted)">
+      <div style="font-weight:700; color:var(--text); margin-bottom:6px">${t('fpExcludedTitle')}</div>
+      ${t('fpExcludedBody', baselineStored, baselineDays)}
+      <ul style="margin:6px 0 0 18px">${excludedKeys.map(k =>
+        `<li>${escapeHtml(k)}: ${Number(baselineExcluded[k]) || 0}</li>`).join('')}</ul>
+    </div>` : '';
+
+  let html = banner + explainHtml + excludedHtml;
 
   // Stat cards
   html += `
@@ -4965,7 +4983,9 @@ const I18N = {
     fp_corr_reload: 'Integration load/reload at {time}',
     fp_corr_top_writer: '{entity} accounts for {pct}% of writes ({n} times) — possible loop/flapping',
     fp_corr_unavail: '{entity} went unavailable {n} times today',
-    fp_corr_top_writer_vs_base: '{entity} wrote {n} times today — above its own baseline peak of {base}',
+    fp_corr_top_writer_vs_base: '{entity} is on pace for {projected} writes today ({n} so far) — above its own baseline peak of {base}',
+    fpExcludedTitle: 'Some stored days are not in this average',
+    fpExcludedBody: 'The baseline is averaged from {0} of the {1} stored days. A day measured over a window this version cannot recognise is left out rather than averaged in: a measurement whose window is unknown is not a smaller error, it is an unknown one. The baseline fills back in on its own as days are measured by the current rule.',
     fp_no_recorder: 'Cannot read data from recorder DB',
     fp_metric_total_writes: 'State writes / day',
     fp_metric_auto_triggers: 'Automation triggers / day',
@@ -5509,7 +5529,9 @@ const I18N = {
     fp_corr_reload: '集成在 {time} 加载/重载',
     fp_corr_top_writer: '{entity} 占了总写入量的 {pct}%({n} 次)—— 可能存在循环或状态抖动',
     fp_corr_unavail: '{entity} 今天变为不可用 {n} 次',
-    fp_corr_top_writer_vs_base: '{entity} 今天写了 {n} 次 —— 超过它自己 {base} 次的基线峰值',
+    fp_corr_top_writer_vs_base: '{entity} 今天预计 {projected} 次写入（目前 {n} 次）—— 超过它自己 {base} 次的基线峰值',
+    fpExcludedTitle: '部分已存的日子没有参与本次平均',
+    fpExcludedBody: '基线由已存的 {0} 天中的 {1} 天平均得出。窗口无法被本版本识别的日子会被排除，而不是被平均进去——窗口未知的测量不是“误差小一点”，而是“不知道”。随着按当前规则测量的日子累积，基线会自行补齐。',
     fp_no_recorder: '无法从记录器数据库读取数据',
     fp_metric_total_writes: '状态写入/天',
     fp_metric_auto_triggers: '自动化触发/天',

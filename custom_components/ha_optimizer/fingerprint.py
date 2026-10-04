@@ -26,6 +26,21 @@ _LOGGER = logging.getLogger(__name__)
 
 FINGERPRINT_STORE_KEY = "ha_optimizer_fingerprint"
 STORAGE_VERSION = 1
+# Bumped whenever the window a baseline day is measured over changes shape.
+# A stored day carries the version that produced it, and a day whose
+# version is not this one is EXCLUDED from the baseline rather than
+# averaged into it: a measurement over a window nobody can name is not a
+# small amount of wrong, it is an unknown.
+#
+# STORAGE_VERSION above is deliberately left alone. Bumping it would make
+# Home Assistant discard the stored days outright; excluding them reports
+# what happened and rebuilds over a week.
+MEASUREMENT_WINDOW_VERSION = 2
+# A 23h or 25h day is not a shorter or longer day, it is a different amount
+# of time over which the same total was measured, so a counted metric from
+# one is not comparable with a counted metric from the other. Two days a
+# year; they are dropped and counted, not silently averaged.
+DST_WINDOW_TOLERANCE_H = 0.5
 BASELINE_DAYS_WINDOW = 30   # keep at most 30 days of history
 MIN_DAYS_FOR_SIGMA = 7      # need at least 7 days for σ; otherwise use IQR
 SIGMA_THRESHOLD = 2.0       # standard deviations to consider an anomaly
@@ -165,7 +180,16 @@ class DailyProfiler:
                 ts_7d    = "strftime('%s', 'now', '-7 days')"
                 dom_expr = "substr(entity_id, 1, instr(entity_id, '.') - 1)"
 
-            metrics: dict[str, Any] = {"date": date_str}
+            metrics: dict[str, Any] = {
+            "date": date_str,
+            # The window this day was actually measured over, so a later
+            # read can tell whether it is comparable with a fresh one.
+            "window": {
+                "version": MEASUREMENT_WINDOW_VERSION,
+                "hours": round((ts_end - ts_start) / 3600.0, 2),
+                "tz": str(tz),
+            },
+        }
 
             with instance.get_session() as session:
                 # 1. Total state writes yesterday
@@ -581,7 +605,8 @@ class CorrelationLinker:
                     # different claim from "writes a lot", and it is the one
                     # that points at a loop rather than a busy integration.
                     vs_base = _baseline_top_writer_corr(
-                        top1["entity_id"], int(top1["writes"]), history_days
+                        top1["entity_id"], int(top1["writes"]), history_days,
+                        float(today_metrics.get("hours_elapsed") or 24.0),
                     )
                     if vs_base:
                         correlations.append(vs_base)
@@ -634,6 +659,8 @@ class FingerprintAnalyzer:
                 "error": "Cannot read data from recorder DB",
                 "anomalies": [],
                 "baseline_days": 0,
+                "baseline_stored_days": 0,
+                "baseline_excluded": {},
                 "today_metrics": {},
             }
 
@@ -643,11 +670,22 @@ class FingerprintAnalyzer:
         # today's own snapshot was not excluded from its own baseline.
         today_str = dt_util.as_local(dt_util.utcnow()).date().isoformat()
 
-        # History = every day except today
-        history = [
+        # History = every stored day except today, and only those measured
+        # over a window this code would still recognise. An excluded day is
+        # counted and its reason reported, because a baseline that quietly
+        # shrank is indistinguishable from a quiet week.
+        candidates = [
             v for k, v in sorted(all_days.items())
             if k != today_str
         ]
+        history: list[dict] = []
+        excluded: dict[str, int] = {}
+        for day in candidates:
+            comparable, why = _window_is_comparable(day)
+            if comparable:
+                history.append(day)
+            else:
+                excluded[why] = excluded.get(why, 0) + 1
 
         baseline_days = len(history)
         anomalies = self._detector.detect(today_metrics, history)
@@ -661,6 +699,10 @@ class FingerprintAnalyzer:
         return {
             "anomalies": anomalies,
             "baseline_days": baseline_days,
+            # What the store holds, and what is not in the average. Both are
+            # numbers the panel can be held to; neither is inferred.
+            "baseline_stored_days": len(candidates),
+            "baseline_excluded": excluded,
             "confidence": confidence,
             "confidence_label": _confidence_label(baseline_days),
             "today_metrics": today_metrics,
@@ -967,8 +1009,31 @@ def _ts_to_local(ts: Any) -> datetime | None:
         return None
 
 
+def _window_is_comparable(day: dict) -> tuple[bool, str]:
+    """Can this stored day be averaged with a fresh measurement? Why not?
+
+    Returns (comparable, reason). The reason is not for a log line - it is
+    counted and reported to the panel, so "why is my baseline short" has an
+    answer on the screen instead of only in this file.
+    """
+    window = day.get("window")
+    if not isinstance(window, dict):
+        # The days written before the window was recorded. Unknowable, so out.
+        return False, "measured before windows were recorded"
+    version = window.get("version")
+    if version != MEASUREMENT_WINDOW_VERSION:
+        return False, f"measured by window rule v{version}, not v{MEASUREMENT_WINDOW_VERSION}"
+    hours = window.get("hours")
+    if not isinstance(hours, (int, float)):
+        return False, "no window length recorded"
+    if abs(float(hours) - 24.0) > DST_WINDOW_TOLERANCE_H:
+        return False, f"a {hours}h day (DST)"
+    return True, ""
+
+
 def _baseline_top_writer_corr(
-    entity_id: str, today_writes: int, history: list[dict]
+    entity_id: str, today_writes: int, history: list[dict],
+    hours_elapsed: float = 24.0,
 ) -> dict | None:
     """Compare today's busiest entity against that same entity's baseline.
 
@@ -988,11 +1053,22 @@ def _baseline_top_writer_corr(
     base_max = max(seen)
     if base_max < TOP_WRITER_MIN_BASELINE:
         return None  # too small a peak for a multiple of it to mean anything
-    if today_writes < base_max * TOP_WRITER_BASELINE_FACTOR:
+    # Project today up to a whole day before comparing it. The stored peaks
+    # are full local days; the figure in hand is whatever has happened since
+    # midnight, so asking for twice a full day meant the first twenty hours
+    # could not raise the tag at all - the only period anyone is awake to
+    # read it. The same helper the totals are projected with, so the two
+    # sites cannot drift into disagreeing about the same day again.
+    projected = _extrapolate_to_day(int(today_writes), hours_elapsed)
+    if projected < base_max * TOP_WRITER_BASELINE_FACTOR:
         return None
     return {
         "key": "fp_corr_top_writer_vs_base",
-        "params": {"entity": entity_id, "n": today_writes, "base": base_max},
+        # `n` stays the observed count. `projected` is what the comparison
+        # used, and the panel says so in words rather than printing a
+        # projection as though it had been counted.
+        "params": {"entity": entity_id, "n": int(today_writes),
+                   "projected": projected, "base": base_max},
     }
 
 

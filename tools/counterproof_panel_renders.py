@@ -111,6 +111,18 @@ CASES = [
     ("(c) a ReferenceError inside the gauge's requestAnimationFrame",
      [(PANEL, *RAF)],
      "_renderOverview", True),
+    # (d) The exclusion reasons are backend strings, and the assertion that
+    # they arrive escaped is only meaningful if the escaping is what makes it
+    # true. An earlier version of that case put the probe string in
+    # `not_contains` and never in the data - so the data could not contain it,
+    # and the assertion was satisfied by nothing at all.
+    ("(d) the exclusion reasons reach the markup unescaped",
+     [(PANEL,
+       "        `<li>${escapeHtml(k)}: ${Number(baselineExcluded[k]) || 0}</li>`)"
+       ".join('')}</ul>\n",
+       "        `<li>${k}: ${Number(baselineExcluded[k]) || 0}</li>`)"
+       ".join('')}</ul>\n")],
+     "present but must not be", True),
     # The control for (c): the identical defect with the old swallow put back is
     # silent again. If this ever goes red, (c) is no longer proving what it
     # claims to prove - the throw would be reaching the harness by another route.
@@ -184,5 +196,5 @@ for label, patches, signal, expect_red in CASES:
 
 print()
 print("FAILED" if missed else
-      "PASSED: both ReferenceErrors are caught and named, and all three holes are closed")
+      "PASSED: every hole is closed, and every one of them is named")
 sys.exit(1 if missed else 0)

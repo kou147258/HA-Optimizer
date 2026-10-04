@@ -188,6 +188,48 @@ CASES = [
                            "ha_lifecycle_events": 0, "top_writers": [],
                            "automation_triggers": 0, "key_events": []},
      }]},
+    # The baseline-short notice. `baseline_excluded` is what the service sends
+    # when stored days were left out of the average, and it is the only place
+    # the user is told why - so it has to render, and the reasons it carries
+    # have to arrive escaped rather than as markup.
+    {"fn": "renderFingerprintResults",
+     "label": "stored days left out of the average are explained, and escaped",
+     "expect": "contains",
+     "contains": ["a 23.0h day (DST)",
+                  "measured before windows were recorded"],
+     "not_contains": ["<img src=x onerror=alert(1)>"],
+     "args": [{
+        "confidence": 20, "confidence_label": {"key": "fp_confidence_very_low",
+                                               "params": {"days": 0}},
+        "baseline_days": 0, "baseline_stored_days": 31,
+        "baseline_excluded": {"a 23.0h day (DST)": 1,
+                              "measured before windows were recorded": 30,
+                              "<img src=x onerror=alert(1)>": 2},
+        "anomalies": [], "sparklines": {},
+        "today_metrics": {"date": "2026-10-04", "hours_elapsed": 10.6,
+                          "partial": True, "total_writes": 1522,
+                          "total_writes_raw": 674, "active_entities": 0,
+                          "unavail_events": 248, "unavail_events_raw": 110},
+        "error": None, "generated_at": "2026-10-04T02:36:00+00:00",
+    }]},
+
+    # The same tab when nothing was excluded. The notice must NOT appear here -
+    # a permanent warning about a condition that does not apply trains people to
+    # ignore warnings, which is how a real one stops being read.
+    {"fn": "renderFingerprintResults",
+     "label": "a complete baseline renders, and explains nothing it did not exclude",
+     "expect": "contains",
+     "not_contains": ["a 23.0h day (DST)",
+                      "measured before windows were recorded"],
+     "args": [{
+        "confidence": 90, "confidence_label": {"key": "x", "params": {}},
+        "baseline_days": 31, "baseline_stored_days": 31, "baseline_excluded": {},
+        "sparklines": {"total_writes": [1, 2, 3]},
+        "anomalies": [], "today_metrics": {"date": "2026-10-04",
+                                           "hours_elapsed": 24, "partial": False},
+        "error": None, "generated_at": "2026-10-04T02:36:00+00:00",
+    }]},
+
     {"fn": "renderFingerprintResults",
      "label": "an anomaly with no percentage to give",
      "expect": "dom",
@@ -641,6 +683,26 @@ for (const c of CASES) {
                   + wrote.map(w => w.id + '.' + w.prop).join(', ')
                   + ' where nothing should be written');
       failed++;
+    }
+  } else if (c.expect === 'contains') {
+    // "Wrote something" cannot tell the notice that explains a short baseline
+    // from any other markup on the tab. These cases name the text they need.
+    const all = wrote.map(w => w.value).join('') + returned;
+    const missing = (c.contains || []).filter(s => !all.includes(s));
+    const leaked = (c.not_contains || []).filter(s => all.includes(s));
+    if (!wrote.length) {
+      console.log('  FAIL  ' + c.fn + ': ' + c.label
+                  + '  -> wrote nothing; this tab would render blank');
+      failed++;
+    } else if (missing.length || leaked.length) {
+      const why = [];
+      if (missing.length) why.push('missing: ' + JSON.stringify(missing));
+      if (leaked.length) why.push('present but must not be: ' + JSON.stringify(leaked));
+      console.log('  FAIL  ' + c.fn + ': ' + c.label + '  -> ' + why.join('; '));
+      failed++;
+    } else {
+      console.log('  ok    ' + c.fn + ': ' + c.label
+                  + '  [' + (c.contains || []).length + ' marker(s) found]');
     }
   } else if (wrote.length) {
     console.log('  ok    ' + c.fn + ': ' + c.label + '  [' + wrote.length + ' writes]');
