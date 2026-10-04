@@ -1,0 +1,1 @@
+1.7.42 — the last two English sentences on screen, and an unescaped backend parameter
