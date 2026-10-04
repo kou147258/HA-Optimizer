@@ -294,6 +294,11 @@ TOOL_CHECKS: list[tuple[str, str, list[str]]] = [
      ["test_automation_i18n.py"]),
     ("auto.diagnosis_i18n.cp", "prose, or a key in one language only, is caught",
      ["counterproof_automation_i18n.py"]),
+    # A hard delete of a UI automation did nothing and said it was YAML. The
+    # registry entry for a UI automation carries no config_entry_id on 2026.8,
+    # and "no config entry" was read as "therefore YAML".
+    ("purge.hard_delete", "a hard delete removes it, or says plainly it did not",
+     ["test_hard_delete_honesty.py"]),
     # The harness's own trust boundary: an injected defect plus a lying exit
     # code must not read as a pass. It also asserts a clean tree still passes,
     # so it cannot be satisfied by a harness that calls everything red.

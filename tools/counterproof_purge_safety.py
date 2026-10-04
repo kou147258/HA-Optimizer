@@ -62,10 +62,24 @@ OLD_TEXT_3 = "still_tracked"
 
 # 4. A live engine call replaced by a comment naming it: the whole-file text
 #    count stays at 3 and the old check stays green, while the number of paths
-#    that leave an entity disabled drops from two to one.
-SITE = ('                            results["disabled_only"].append(entity_id)\n'
+#    that leave an entity disabled drops from three to two.
+#
+#    The anchor carries the `outcome == "failed"` branch above it because the
+#    `disabled_only` + `_record_if_callbacked` pair now appears at more than one
+#    site. It refused to run when the anchor matched twice and said so, which is
+#    the correct way round - a counter-proof that guessed which occurrence to
+#    comment out would be testing a different thing than it claims.
+SITE = ('                            if outcome == "failed":\n'
+        '                                results.setdefault("not_disabled", []).append(\n'
+        '                                    entity_id\n'
+        '                                )\n'
+        '                            results["disabled_only"].append(entity_id)\n'
         "                            await _record_if_callbacked(\n"
         "                                on_left_disabled, entity_id, results)\n",
+        '                            if outcome == "failed":\n'
+        '                                results.setdefault("not_disabled", []).append(\n'
+        '                                    entity_id\n'
+        '                                )\n'
         '                            results["disabled_only"].append(entity_id)\n'
         "                            # await _record_if_callbacked(\n"
         "                            #     on_left_disabled, entity_id, results)\n")

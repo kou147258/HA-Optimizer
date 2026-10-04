@@ -156,19 +156,50 @@ class PurgeEngine:
                         outcome = await self._remove_by_domain(entity_id)
                         if outcome == "removed":
                             results["success"].append(entity_id)
-                        elif outcome == "disabled":
-                            # It is NOT gone. Reporting this as a success made
-                            # a failed hard delete look completed, and the
-                            # entity stopped being tracked in the trash.
+                        elif outcome in ("disabled", "failed"):
+                            # It is NOT gone, and it is not nothing either. Both
+                            # of these mean the removal could not complete, and
+                            # the answer is the same: disable it and record it,
+                            # so the trash can put it back. Reporting this as a
+                            # success made a failed hard delete look completed
+                            # and the entity stopped being tracked; leaving it
+                            # alone is not the answer either, because the user
+                            # asked for it to go.
+                            if outcome == "failed":
+                                results.setdefault("not_disabled", []).append(
+                                    entity_id
+                                )
                             results["disabled_only"].append(entity_id)
                             await _record_if_callbacked(
                                 on_left_disabled, entity_id, results)
                         else:
-                            results["yaml_manual"].append({
+                            # A YAML automation is one HA says is YAML: its
+                            # registry entry has platform == "yaml". This branch
+                            # is reached for anything else too, so the note is
+                            # gated on that and the reason is not invented. What
+                            # is the same either way is the response: nothing was
+                            # removed, so disable it and record it, which is
+                            # undoable from the trash. Leaving it running because
+                            # we could not identify it is not a safer answer, it
+                            # is just a different way of not doing what was
+                            # asked.
+                            is_yaml = getattr(entry, "platform", None) == "yaml"
+                            row = {
                                 "entity_id": entity_id,
-                                "platform": entry.platform,
-                                "note": f"This {domain} is defined in YAML and must be removed manually",
-                            })
+                                "platform": getattr(entry, "platform", None),
+                                "outcome": "no_owner",
+                            }
+                            row["note"] = (
+                                f"This {domain} is defined in YAML and must be "
+                                f"removed manually" if is_yaml else
+                                "No config entry or UI-config item owns this, so it "
+                                "could not be removed from here. It has been "
+                                "disabled and recorded instead."
+                            )
+                            results["yaml_manual"].append(row)
+                            results["disabled_only"].append(entity_id)
+                            await _record_if_callbacked(
+                                on_left_disabled, entity_id, results)
                     continue
 
                 # Skip high-risk safety entities
@@ -434,35 +465,115 @@ class PurgeEngine:
         if domain not in ("automation", "script"):
             return "not_found"
 
-        try:
-            # The entity registry entry carries the config entry that owns it.
-            # That is the only reliable link: the entity_id slug, the config
-            # entry's unique_id and its entry_id are all different things.
-            ent_reg = er.async_get(self.hass)
-            reg_entry = ent_reg.async_get(entity_id)
-            entry_id = getattr(reg_entry, "config_entry_id", None)
-            if entry_id:
-                await self.hass.config_entries.async_remove(entry_id)
-                _LOGGER.info("Deleted %s config entry %s", domain, entry_id)
-                return "removed"
-            else:
-                # YAML-defined: no config entry owns it, so it cannot be
-                # deleted from here at all.
-                _LOGGER.info(
-                    "%s has no config entry (YAML-defined) - cannot delete", entity_id
-                )
-                return "not_found"
+        ent_reg = er.async_get(self.hass)
+        reg_entry = ent_reg.async_get(entity_id)
+        if reg_entry is None:
+            return "not_found"
 
-        except Exception as exc:
-            _LOGGER.warning(
-                "Could not delete %s: %s - disabling instead", entity_id, exc
-            )
-            ent_reg = er.async_get(self.hass)
+        def _failed(why: str) -> str:
+            """A removal that could not complete.
+
+            Disable the entity so it at least stops, and let the caller record
+            it - the trash record is what makes that reversible. A disabled
+            entity with NO record is the one state nothing in this integration
+            can undo, so the two always travel together.
+            """
+            _LOGGER.warning("%s: %s - disabling instead", entity_id, why)
             if ent_reg.async_get(entity_id):
                 ent_reg.async_update_entity(
                     entity_id, disabled_by=er.RegistryEntryDisabler.USER
                 )
             return "disabled"
+
+        # Where a UI-created automation actually lives. On 2026.8.3 its entity
+        # registry entry carries no `config_entry_id` at all, so the config
+        # entry branch below never fired for it, and the only thing that came
+        # back was a wrong explanation. The REST endpoint the automation editor
+        # uses is built on this collection, and deleting through it was verified
+        # to work on a live instance.
+        #
+        # A guarded import, and a distinct "failed" if the call itself errors:
+        # falling through on an ImportError is safe (it does what it did
+        # before), but swallowing a real failure would report a removal that
+        # did not happen.
+        unique_id = getattr(reg_entry, "unique_id", None)
+        if unique_id:
+            try:
+                from homeassistant.helpers import automation_config
+
+                collection = automation_config.async_get_collection(self.hass)
+            except ImportError as exc:
+                _LOGGER.debug(
+                    "%s: no automation_config helper (%s); falling back to the "
+                    "config entry path", entity_id, exc,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.warning("Could not reach the %s config collection for %s: %s",
+                                domain, entity_id, exc)
+                return _failed("the config collection could not be reached")
+            else:
+                try:
+                    if await collection.async_get(unique_id) is not None:
+                        await collection.async_delete_item(unique_id)
+                        _LOGGER.info("Deleted %s %s from the UI config", domain, unique_id)
+                        return "removed"
+                except Exception as exc:  # noqa: BLE001
+                    _LOGGER.warning("Could not delete %s from the %s config "
+                                    "collection: %s", entity_id, domain, exc)
+                    return _failed("the config collection refused the delete")
+
+        # A config entry owns it. The entity_id slug, the config entry's
+        # unique_id and its entry_id are all different things, so the registry
+        # entry is the only reliable link between them.
+        entry_id = getattr(reg_entry, "config_entry_id", None)
+        if entry_id:
+            try:
+                await self.hass.config_entries.async_remove(entry_id)
+                _LOGGER.info("Deleted %s config entry %s", domain, entry_id)
+                return "removed"
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.warning("Could not remove the %s config entry for %s: %s",
+                                domain, entity_id, exc)
+                return _failed("the owning config entry could not be removed")
+
+        # No config entry and not in the UI config collection. That is all that
+        # is actually known - and it is NOT the same as "this is YAML". A YAML
+        # automation has `platform == "yaml"`; the automations this used to
+        # mislabel had `platform` None and `is_yaml_entity` False, one being
+        # created through the REST API the editor itself uses.
+        #
+        # The response is the same as any other removal that could not finish:
+        # disable it, and let the caller record it. Leaving it running because we
+        # could not identify it is not a safer answer - it is a different way of
+        # not doing what was asked, and the record is what makes it undoable.
+        _LOGGER.info(
+            "%s has no owning config entry and is not in the %s config collection; "
+            "disabling it instead", entity_id, domain,
+        )
+        if ent_reg.async_get(entity_id):
+            ent_reg.async_update_entity(
+                entity_id, disabled_by=er.RegistryEntryDisabler.USER
+            )
+        return "no_owner"
+
+        # Last resort. Every path above returns, so nothing reaches here today;
+        # it is what a future edit that forgets to return would hit, and it
+        # disables rather than claiming a removal.
+        #
+        # Note the change of intent from the version this replaced: a hard
+        # delete that could not complete used to disable the entity anyway,
+        # which is how an entity ended up disabled with no trash record and
+        # nothing in the panel able to undo it. Now a failed hard delete
+        # touches nothing, is reported as a failure, and the user can choose the
+        # soft delete that is actually reversible.
+        _LOGGER.warning("%s could not be removed and no reason was recorded",
+                        entity_id)
+        ent_reg = er.async_get(self.hass)
+        if ent_reg.async_get(entity_id):
+            ent_reg.async_update_entity(
+                entity_id, disabled_by=er.RegistryEntryDisabler.USER
+            )
+        return "disabled"
 
 # Device classes that must never be removed here. This used to be a second,
 # hand-maintained copy of SAFETY_DEVICE_CLASSES that had silently drifted: it

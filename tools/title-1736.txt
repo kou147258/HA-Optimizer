@@ -1,0 +1,1 @@
+1.7.36 — the automation tab: common causes now follow your language, and the newest run is no longer hidden

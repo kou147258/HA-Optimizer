@@ -369,15 +369,73 @@ check("purge service keeps disabled_only entities in the trash",
 # The engine's own side of that. This was a whole-file count of the literal text
 # "_record_if_callbacked(", which a comment naming the helper inflates and a
 # removed call site deflates - so it counted text, not trash records. Count the
-# CALL NODES instead: one definition and at least two call sites.
+# CALL NODES instead.
+#
+# And not a floor on them either. "At least two call sites" was true with three
+# paths in the engine, and commenting one out left two - still passing, while
+# the branch it belonged to disabled an entity and recorded nothing. That is
+# precisely the state the check exists to prevent, reachable by deleting one
+# line. So the invariant is structural: EVERY branch that puts an entity into
+# `disabled_only` must also record it, one for one.
 _engine_defs = _fn_nodes(engine_src, "_record_if_callbacked")
 _sites = sorted(c.lineno for c in ast.walk(ast.parse(engine_src))
                 if isinstance(c, ast.Call) and _dotted(c.func) == "_record_if_callbacked")
+
+
+def _stmt_lists(tree: ast.AST):
+    for node in ast.walk(tree):
+        for f in ("body", "orelse", "finalbody"):
+            v = getattr(node, f, None)
+            if isinstance(v, list) and v and all(isinstance(s, ast.stmt) for s in v):
+                yield v
+
+
+def _appends_disabled(stmt: ast.AST) -> bool:
+    return (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)
+            and isinstance(stmt.value.func, ast.Attribute)
+            and stmt.value.func.attr == "append"
+            and "disabled_only" in ast.unparse(stmt.value.func.value))
+
+
+def _records(stmt: ast.AST) -> bool:
+    return (isinstance(stmt, ast.AST)
+            and any(isinstance(n, ast.Call) and _dotted(n.func) == "_record_if_callbacked"
+                    for n in ast.walk(stmt)))
+
+
+def _blocks_recording(tree: ast.AST) -> tuple[list[int], list[int]]:
+    """(branches that disable, of those the ones that also record).
+
+    Per BRANCH, not per block: an append and the record call that belongs to it
+    have to be in the same statement list, and the record call has to come after
+    the append. Counting a whole enclosing `for` body as one unit would let any
+    one of three branches lose its call and still pass, which is the exact
+    defect - a disabled entity with no trash record.
+    """
+    disables: list[int] = []
+    records: list[int] = []
+    for stmts in _stmt_lists(tree):
+        for i, stmt in enumerate(stmts):
+            if not _appends_disabled(stmt):
+                continue
+            disables.append(stmt.lineno)
+            if any(_records(s) for s in stmts[i + 1:]):
+                records.append(stmt.lineno)
+    return disables, records
+
+
+_disables, _records_lines = _blocks_recording(ast.parse(engine_src))
+check("every branch that leaves an entity disabled also records it",
+      sorted(_disables) == sorted(_records_lines),
+      f"disables at lines {_disables} but only {_records_lines} of them record; "
+      f"a disabled entity with no trash record is the one state nothing here can "
+      f"undo, and deleting one _record_if_callbacked call reaches it")
 check("the engine records every path that leaves an entity disabled",
-      len(_engine_defs) == 1 and len(_sites) >= 2,
+      len(_engine_defs) == 1 and len(_sites) == len(_disables),
       f"defined {len(_engine_defs)}x, called from {len(_sites)} site(s) at lines "
-      f"{_sites}; a hard delete that could only disable disables just as a soft "
-      f"delete does, and needs the same trash record")
+      f"{_sites}, for {len(_disables)} disabling branch(es); a hard delete that "
+      f"could only disable disables just as a soft delete does, and needs the "
+      f"same trash record")
 
 # The soft path records the whole batch BEFORE the engine disables anything.
 # The order is the invariant, not the mechanism: a crash between the two must
