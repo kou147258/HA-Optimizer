@@ -123,6 +123,27 @@ CASES = [
        "        `<li>${k}: ${Number(baselineExcluded[k]) || 0}</li>`)"
        ".join('')}</ul>\n")],
      "present but must not be", True),
+    # (e) The DOM-writer census is the check that makes the coverage number
+    # honest - "14 of 14 render entry points" was 14 out of 50 functions that
+    # write to the document. A new writer nobody has thought about has to fail
+    # it, or the blind spot just gets wider and the count still reads full.
+    ("(e) a new function writes to the document and nobody declared it",
+     [(PANEL,
+       "async function loadSoftDeleted() {",
+       "async function brandNewThingNobodyDeclared() {\n"
+       "  document.getElementById('x').innerHTML = 'x';\n"
+       "}\n"
+       "async function loadSoftDeleted() {")],
+     "neither driven nor declared", True),
+
+    # (f) And the other direction: a declared gap that has stopped writing is a
+    # lie in the list, and the list is what the coverage number is read off.
+    ("(f) a declared gap that no longer writes to the document",
+     [(TEST, '    "toast", "buildLangMenu", "buildThemeMenu", "_applyTranslations",',
+       '    "aFunctionThatWasNeverDeclaredHere",\n'
+       '    "toast", "buildLangMenu", "buildThemeMenu", "_applyTranslations",')],
+     "no longer writes to the document", True),
+
     # The control for (c): the identical defect with the old swallow put back is
     # silent again. If this ever goes red, (c) is no longer proving what it
     # claims to prove - the throw would be reaching the harness by another route.

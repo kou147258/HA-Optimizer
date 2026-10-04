@@ -163,6 +163,79 @@ for m in list(ENTRY_DECL.finditer(code)) + list(ENTRY_ASSIGN.finditer(code)):
 check("the panel declares render entry points to drive", bool(FOUND), "none found")
 print(f"        {len(FOUND)} render entry points found: {', '.join(FOUND)}")
 
+# ── every top-level function that writes to the document, named or not ─────
+# `render*` is a naming convention, not a coverage guarantee. The trash table
+# is drawn by `loadSoftDeleted`, an async service loader that would not call
+# itself a render even if it rendered - so no case drove it, and the count
+# above read as full coverage while a whole table went unexecuted.
+#
+# So the coverage question is asked of the CODE rather than of the names: every
+# top-level function that assigns to a DOM property is found here, and has to
+# be driven by a case below or declared here with a reason. A new DOM writer
+# that nobody has thought about fails the check rather than joining a blind
+# spot.
+TOP_FN = re.compile(r"^(?:async[ \t]+)?function[ \t]+(\w+)[ \t]*\(", re.M)
+# A line at column 0 begins the next top-level statement. The panel indents
+# function bodies, so this bounds each body without parsing JavaScript.
+TOP_STMT = re.compile(
+    r"^(?:async[ \t]+)?function[ \t]+\w+[ \t]*\(|^(?:const|let|var|class)[ \t]", re.M)
+DOM_WRITE = re.compile(
+    r"\.(?:innerHTML|outerHTML|textContent|innerText)\s*=(?!=)"
+    r"|\.(?:insertAdjacentHTML|appendChild|replaceChildren|prepend|append|after|before)\s*\(")
+
+_starts = [(m.start(), m.group(1)) for m in TOP_FN.finditer(code)]
+_bounds = [m.start() for m in TOP_STMT.finditer(code)]
+writers: dict[str, str] = {}
+for pos, name in _starts:
+    nxt = [b for b in _bounds if b > pos]
+    writers[name] = code[pos:nxt[0] if nxt else len(code)]
+writers = {n: b for n, b in writers.items() if DOM_WRITE.search(b)}
+
+# Real gaps, each one a decision rather than a shape - a rename makes the
+# "still a real gap" check below fail, which is the point. A new DOM writer is
+# not absorbed into a convenient pattern; someone has to say what it is.
+#
+#   the trash table and the other async service loaders - driving them means
+#     stubbing a service response, and a wrong stub is worse than no stub
+#     because it looks like coverage;
+#   the destructive and interactive actions - reached from a click, and several
+#     of them delete things. A smoke test that calls them can do damage;
+#   chrome - toasts, connection status, the language and theme menus, the
+#     empty-state placeholders. One line of status text, no view to get wrong.
+DECLARED_GAPS = {
+    # async service loaders
+    "loadSoftDeleted", "loadAddonTab", "loadAutomationRuns", "loadSavedLang",
+    "triggerCollectBaseline", "triggerDashboardAnalysis", "triggerDeadCodeAnalysis",
+    "triggerFingerprintAnalysis", "triggerHealthAnalysis", "triggerRecorderAnalysis",
+    "triggerScan", "triggerStormAnalysis", "recalcHealthFromResults",
+    "_fetchSysBarOnly", "_addonRealtimeTick", "_refreshEmptyStates",
+    "updateStats", "updateSoftDeleteCount", "updateSelectedBar",
+    # destructive and interactive actions
+    "hardDeleteEntity", "emptyTrashFlow", "cancelEmptyTrash", "performEmptyTrash",
+    "restoreAllTrash", "restoreEntity", "showPurgeModal", "addonStart", "addonStop",
+    "addonUpdate", "setLang", "setTheme", "_setSysbarUnavailable",
+    # chrome
+    "toast", "buildLangMenu", "buildThemeMenu", "_applyTranslations",
+    "_updateConnStatus", "_patchAddonStats",
+}
+
+_driven = sorted(n for n in writers if n in FOUND)
+_gaps = sorted(n for n in writers if n in DECLARED_GAPS)
+undeclared = sorted(n for n in writers if n not in FOUND and n not in DECLARED_GAPS)
+stale = sorted(n for n in DECLARED_GAPS if n not in writers)
+
+check("every function that writes to the document is driven or declared",
+      not undeclared,
+      f"writes to the document but is neither driven nor declared: "
+      f"{', '.join(undeclared)} - add a case, or declare it with a reason")
+check("each declared gap is still a real gap",
+      not stale,
+      f"declared but no longer writes to the document: {', '.join(stale)} - "
+      f"the gap closed, so the entry is now a lie")
+print(f"        {len(writers)} function(s) write to the document: "
+      f"{len(_driven)} driven, {len(_gaps)} declared gap(s)"
+      + (f" ({', '.join(_gaps)})" if _gaps else ""))
+
 # The payload shapes that have each broken this tab, kept deliberately explicit
 # so a future change that drops one of them is visible here. `expect` is what the
 # case asserts about the OUTPUT, not just that nothing threw:

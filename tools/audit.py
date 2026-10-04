@@ -226,7 +226,7 @@ TOOL_CHECKS: list[tuple[str, str, list[str]]] = [
     ("panel.filters", "filter behaviour", ["test_filters.js"]),
     ("trash.bulk", "trash bulk operations", ["test_trash_bulk.py"]),
     ("panel.ui_labels", "UI label and control naming", ["test_ui_labels.py"]),
-    ("panel.renders", "every render entry point runs, and writes something",
+    ("panel.renders", "every render entry point runs, and no DOM writer is undeclared",
      ["test_panel_renders.py"]),
     ("panel.renders.cp",
      "the render check catches a neutered renderer, a blank render and a swallowed throw",
