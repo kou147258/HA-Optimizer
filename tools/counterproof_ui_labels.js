@@ -123,3 +123,7 @@ fs.unlinkSync(tmp);
 console.log();
 if (bad) { console.log(`${bad} counter-proof(s) did not hold`); process.exit(1); }
 console.log(`all ${MUTATIONS.length} counter-proofs held: every injected defect was caught`);
+// The canonical verdict line. audit.py requires it, because an exit code alone
+// is not a verdict - it is what a tool that failed three assertions and
+// `sys.exit(0)` also produces.
+console.log("PASSED");

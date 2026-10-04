@@ -105,3 +105,7 @@ if FAILURES:
         print(f"  - {f}")
     sys.exit(1)
 print("all live-log findings are guarded")
+# The canonical verdict line. audit.py requires it: an exit code is not a
+# verdict, it is also what a tool that failed three assertions and
+# `sys.exit(0)` produces.
+print("PASSED")

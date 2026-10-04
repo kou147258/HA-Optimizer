@@ -269,9 +269,55 @@ TOOL_CHECKS: list[tuple[str, str, list[str]]] = [
      ["test_check_tools.py"]),
     ("tools.reach_verdict.cp", "the unreachable-tail check can still fail",
      ["counterproof_check_tools.py"]),
+    # The harness's own trust boundary: an injected defect plus a lying exit
+    # code must not read as a pass. It also asserts a clean tree still passes,
+    # so it cannot be satisfied by a harness that calls everything red.
+    ("tools.audit_trust", "the harness rejects a check that lies about itself",
+     ["test_audit_trust.py"]),
     ("release.bom", "the release survives a title file with a BOM",
      ["test_release_text.py"]),
 ]
+
+
+# A tool has to SAY it passed, and its arithmetic has to add up.
+#
+# The exit code alone was the entire trust boundary of this file, and an audit
+# of the suite proved it could be crossed in one line: a check that printed
+# "7/10 passed" plus three FAIL lines and then `sys.exit(0)` was reported here
+# as `ok  pass`. Every check's own verdict line was decorative.
+#
+# The rule is read off what the tools actually print, not guessed - the first
+# version of it guessed and turned nine genuinely-green checks red, because a
+# counter-proof legitimately PRINTS `FAIL` lines: that is the injected defect's
+# report, indented, and its own last line says the defect was caught. So:
+#
+#   * the verdict is the last line that LOOKS like one, because log output can
+#     follow it (an engine's own warnings do);
+#   * a `FAIL` at column 0 is a verdict and a failure; an indented one is data;
+#   * `N/M passed` has to satisfy N == M. That is what closes the hole: no
+#     amount of wording rescues 7/10.
+VERDICT_SHAPE = re.compile(
+    r"^(?:PASSED\b|OK\b|\d+\s*/\s*\d+\s*passed\b|.*\ball\b.*\bpassed\b)", re.I)
+COUNTED = re.compile(r"(\d+)\s*/\s*(\d+)\s*passed\b", re.I)
+
+
+def tool_verdict(out: str) -> tuple[bool, str]:
+    """Did this tool say it passed? Returns (believed_pass, evidence)."""
+    lines = [ln.rstrip() for ln in out.splitlines() if ln.strip()]
+    # A verdict at column 0 that is a failure settles it immediately.
+    for ln in lines:
+        if ln.startswith("FAILED") or re.match(r"^FAIL\b", ln):
+            return False, f"reported a failure: {ln.strip()[:60]!r}"
+    verdict = next((ln.strip() for ln in reversed(lines)
+                    if VERDICT_SHAPE.match(ln.strip())), None)
+    if verdict is None:
+        return False, "printed no verdict line at all"
+    m = COUNTED.search(verdict)
+    if m and m.group(1) != m.group(2):
+        return False, f"its own count does not add up: {verdict[:60]!r}"
+    if verdict.upper().startswith("FAILED"):
+        return False, f"its verdict line was: {verdict[:60]!r}"
+    return True, verdict
 
 
 def check_tool(audit: Audit, cid: str, name: str, argv: list[str]) -> None:
@@ -279,12 +325,15 @@ def check_tool(audit: Audit, cid: str, name: str, argv: list[str]) -> None:
     r = subprocess.run([*exe, str(TOOLS / argv[0])], capture_output=True,
                        text=True, encoding="utf-8", errors="replace", cwd=str(ROOT))
     out = (r.stdout or "") + (r.stderr or "")
+    claimed_pass, evidence = tool_verdict(out)
     details = []
     if r.returncode != 0:
         details = [ln.strip(" -│") for ln in out.splitlines()
                    if ln.strip().startswith("FAIL") or "FAILED" in ln][:6]
         details = [d for d in details if d] or [f"exit {r.returncode}"]
-    audit.add(cid, name, r.returncode == 0, details, out)
+    elif not claimed_pass:
+        details = [f"exited 0 but {evidence}"]
+    audit.add(cid, name, r.returncode == 0 and claimed_pass, details, out)
 
 
 # ── checks: run in-process, no child process ───────────────────────────────

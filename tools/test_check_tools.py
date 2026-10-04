@@ -52,46 +52,66 @@ def is_exit(node: ast.AST) -> bool:
     return False
 
 
-def exit_calls(tree: ast.Module) -> list[ast.Call]:
-    return [n for n in ast.walk(tree) if is_exit(n)]
+def is_system_exit(stmt: ast.AST) -> bool:
+    """True for `raise SystemExit` and `raise SystemExit(...)`.
+
+    This is a RAISE, not a call, so `is_exit` cannot see it - and a tool whose
+    summary-and-exit is written that way had no terminator as far as this check
+    was concerned, which is the same hole from a different spelling.
+    """
+    if not isinstance(stmt, ast.Raise) or stmt.exc is None:
+        return False
+    e = stmt.exc.func if isinstance(stmt.exc, ast.Call) else stmt.exc
+    if isinstance(e, ast.Name):
+        return e.id == "SystemExit"
+    if isinstance(e, ast.Attribute):
+        return e.attr == "SystemExit"
+    return False
 
 
-def bare_exit_at_top_level(tree: ast.Module) -> int | None:
-    """The index of an unconditional module-level exit, if there is one.
+def terminates_run(stmt: ast.AST) -> bool:
+    """A statement that ends the process whenever it is reached."""
+    return (isinstance(stmt, ast.Expr) and is_exit(stmt.value)) or is_system_exit(stmt)
 
-    An exit inside `if FAILURES:` is not one: the statements after it are
-    reached whenever there were no failures, which is the point of that idiom
-    and is how most of these tools report success. Only a bare
-    `sys.exit(...)` in the module's own flow ends the run no matter what, and
-    anything after it is dead.
+
+def is_main_guard(stmt: ast.AST) -> bool:
+    """True for `if __name__ == "__main__":`, which is always taken here.
+
+    Every one of these tools is run as a script by the harness, so an exit
+    inside that guard ends the run exactly like a top-level one does. It is
+    the one branch that is not a branch, and treating it as one left a second
+    spelling of the original defect uncatchable.
+    """
+    if not isinstance(stmt, ast.If) or not isinstance(stmt.test, ast.Compare):
+        return False
+    c = stmt.test
+    if len(c.ops) != 1 or not isinstance(c.left, ast.Name) or c.left.id != "__name__":
+        return False
+    return any(isinstance(v, ast.Constant) and v.value == "__main__"
+               for v in c.comparators)
+
+
+def dead_tail(tree: ast.Module) -> list[ast.stmt]:
+    """The module-level statements that can never run, in file order.
+
+    A conditional exit - `if FAILURES: sys.exit(1)` - is deliberately not one of
+    these: the statements after it are reached whenever there were no failures,
+    which is how most of these tools report success. Only something that ends
+    the run no matter what makes the rest of the file dead, and a bare exit, a
+    `raise SystemExit`, and an exit inside the `__main__` guard are the three
+    spellings of that.
+
+    Statements after the terminator INSIDE the guard are dead too, which is why
+    the guard's own body is scanned and not just the module's.
     """
     for i, stmt in enumerate(tree.body):
-        if isinstance(stmt, ast.Expr) and is_exit(stmt.value):
-            return i
-    return None
-
-
-def _unguarded_exits(tree: ast.Module) -> list[ast.Call]:
-    """The exits that end the run whatever happens.
-
-    A bare `sys.exit(...)` as a top-level statement, and any exit inside a
-    top-level compound statement, is a verdict: exactly one is wanted, because a
-    second one is unreachable. An exit inside a `def` is not one of these - it
-    belongs to a function, usually an `if __name__` guard, and is not a verdict
-    for the module.
-
-    The first version of this asked "is this exit inside a branch?" by walking
-    the whole tree, and Module.body matched itself, so every exit counted as
-    guarded and every tool reported zero.
-    """
-    out: list[ast.Call] = []
-    for stmt in tree.body:
-        if isinstance(stmt, ast.Expr) and is_exit(stmt.value):
-            out.append(stmt.value)
-        elif isinstance(stmt, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try,
-                               ast.With, ast.AsyncWith)):
-            out.extend(node for node in ast.walk(stmt) if is_exit(node))
-    return out
+        if terminates_run(stmt):
+            return tree.body[i + 1:]
+        if is_main_guard(stmt):
+            for j, inner in enumerate(stmt.body):
+                if terminates_run(inner):
+                    return [*stmt.body[j + 1:], *tree.body[i + 1:]]
+    return []
 
 
 tools = sorted(p for p in TOOLS.glob("*.py")
@@ -99,8 +119,11 @@ tools = sorted(p for p in TOOLS.glob("*.py")
                and p.name != Path(__file__).name)
 check("there are tools to check", bool(tools), f"none under {TOOLS}")
 
-without_exit: list[str] = []
-
+# A tool that ends through a function, or falls off the end, or aborts inside
+# `if FAILURES:` is fine - none of those is a terminator. This check used to
+# keep a list of them and print it, which read like coverage: the count went
+# down as the rule got narrower, and the tools in it were never looked at.
+checked = 0
 for path in tools:
     rel = path.relative_to(ROOT)
     src = path.read_text(encoding="utf-8")
@@ -110,32 +133,19 @@ for path in tools:
         check(f"{rel} parses", False, str(exc))
         continue
 
-    calls = exit_calls(tree)
-    idx = bare_exit_at_top_level(tree)
+    tail = dead_tail(tree)
+    checked += 1
+    check(f"{rel} has no unreachable tail", not tail,
+          f"{len(tail)} statement(s) after something that ends the run no matter "
+          f"what, starting with {type(tail[0]).__name__ if tail else ''} - they "
+          f"never run and the file still reports green")
 
-    if idx is None:
-        # A tool that ends through a function, or falls off the end, is fine.
-        # A conditional early exit - `if the anchor is not unique: exit` - is
-        # also fine, and refusing to run the cases at all is the right thing
-        # to do. Neither is a defect, so neither is asserted. This check once
-        # counted EVERY sys.exit and called a tool with two guard clauses plus
-        # its verdict "exits exactly once", which is not what it says.
-        without_exit.append(str(rel))
-    else:
-        # Only the tail matters. There used to be a second rule here, "reaches
-        # its verdict through exactly one exit", and it was wrong twice: it
-        # counted a guard clause as a second verdict, and fixing that made it
-        # count zero. A module that aborts early and then has one final exit is
-        # correct. The defect worth catching is one shape only - module-level
-        # work after a top-level exit, which can never run.
-        tail = tree.body[idx + 1:]
-        check(f"{rel} has no unreachable tail", not tail,
-              f"{len(tail)} module-level statement(s) after a top-level exit, "
-              f"starting with {type(tail[0]).__name__ if tail else ''} - they "
-              f"never run and the file still reports green")
-
-print(f"  ({len(without_exit)} tool(s) end through a function or fall off the end: "
-      + ", ".join(without_exit) + ")")
+# The count is asserted, not printed. A summary line that goes quiet when the
+# rule narrows is indistinguishable from one that went quiet because it stopped
+# looking; making it an assertion means a tool that stops being scanned fails
+# instead of quietly disappearing from a log line.
+check("every tool was scanned", checked == len(tools),
+      f"{checked} of {len(tools)}")
 
 ok = sum(1 for r in results if r[0])
 print()

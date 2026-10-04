@@ -40,6 +40,24 @@ CASES = [
      'sys.exit(0)\ncheck("the component has python sources to check", bool(files)',
      "test_py_names.py has no unreachable tail"),
 
+    # The same defect, spelled the two ways the shape checker used to miss.
+    # `raise SystemExit` is a Raise, not a Call, so the old `is_exit` could not
+    # see it; an exit inside `if __name__ == "__main__":` is not a bare
+    # top-level statement, so the old index lookup could not see that either.
+    # Both leave thirteen-assertions-worth of dead code reported as green.
+    ("a tool ends the run with `raise SystemExit`",
+     "tools/test_store_records.py",
+     'check("a normal window still expires the old one",',
+     'raise SystemExit(0)\ncheck("a normal window still expires the old one",',
+     "test_store_records.py has no unreachable tail"),
+
+    ("a tool ends the run inside the __main__ guard",
+     "tools/test_store_records.py",
+     'check("a normal window still expires the old one",',
+     'if __name__ == "__main__":\n    sys.exit(0)\n'
+     'check("a normal window still expires the old one",',
+     "test_store_records.py has no unreachable tail"),
+
     ("the release reads the title again without stripping the BOM",
      "tools/audit.py",
      '    text = title.read_text(encoding="utf-8-sig").strip()\n',
