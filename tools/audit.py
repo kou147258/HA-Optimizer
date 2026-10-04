@@ -276,6 +276,17 @@ TOOL_CHECKS: list[tuple[str, str, list[str]]] = [
      ["test_audit_trust.py"]),
     ("release.bom", "the release survives a title file with a BOM",
      ["test_release_text.py"]),
+    # Each of these measures its own check twice: the current rule must catch
+    # the injected defect and the pre-fix rule must not, so "the check went red"
+    # cannot be satisfied by a broken file. The pre-fix rules are frozen under
+    # tools/prefix_rules/ - reading them from git works until the fix lands, and
+    # then there is nothing left to compare against.
+    ("panel.scan_contract.cp.wrong_dict", "the key cannot be parked in an unrelated dict",
+     ["counterproof_scan_contract_wrong_dict.py"]),
+    ("source.noop_ternary.cp.branches", "the no-op check sees the if/else form",
+     ["counterproof_noop_ternaries_branches.py"]),
+    ("i18n.param_shapes.cp.call_form", "the param-shape check sees the call form",
+     ["counterproof_i18n_param_shapes_call_form.py"]),
 ]
 
 
