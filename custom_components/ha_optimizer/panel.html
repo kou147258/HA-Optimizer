@@ -4128,6 +4128,14 @@ function renderFingerprintResults(d, ts) {
   const today = d.today_metrics || {};
   const sparklines = d.sparklines || {};
   const hoursElapsed = today.hours_elapsed || 0;
+  // Declared HERE, next to `today`, because that is where the day's context
+  // lives. It was declared inside _fpMetricRow, which is a different scope -
+  // so reading `today` from there threw, and passing this name from here threw
+  // again. The same mistake twice, in two different files, is what the render
+  // smoke test next to this file is for.
+  const partialDay = (today.partial !== null && today.partial !== undefined)
+    ? !!today.partial
+    : hoursElapsed < 23;
 
   const confColor = confidence >= 75 ? 'var(--success)' : confidence >= 50 ? 'var(--warning)' : 'var(--danger)';
   const banner = ts ? _staleBanner('fingerprint', ts, 'triggerFingerprintAnalysis') : '';
@@ -6372,7 +6380,7 @@ document.addEventListener('DOMContentLoaded', () => {
      The strip prints both, and a mismatch becomes visible instead of having to
      be inferred. Bumped with the version; check_build_stamp keeps it in step
      with const.py. -->
-<script>const PANEL_FILE_BUILD = '1.7.30';
+<script>const PANEL_FILE_BUILD = '1.7.31';
        const EXPECTED_TAB_COUNT = 10;</script>
 <script>
 /* What this browser actually loaded, as facts. The file on disk was correct
