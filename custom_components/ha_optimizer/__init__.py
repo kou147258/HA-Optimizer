@@ -389,12 +389,23 @@ def _copy_panel_to_www(hass: HomeAssistant) -> bool:
         if served is None:
             _LOGGER.info("Installed panel.html → %s", dst)
         else:
-            # Said as a warning because the stale copy is worth knowing about:
-            # the panel on screen was not the code that was installed. But it
-            # says the replacement SUCCEEDED and what to do, because this fires
-            # on every upgrade and a message that only reports a problem trains
-            # people to dismiss the banner.
-            _LOGGER.warning(
+            # INFO, not warning - and that is a reversal, deliberately.
+            #
+            # This was a warning on the reasoning that the stale copy is worth
+            # knowing about, balanced against "a message that only reports a
+            # problem trains people to dismiss the banner". The balance was
+            # decided backwards, and a real user answered it: this message was
+            # pasted to me as a failure while saying, in its own words, that
+            # nothing is wrong.
+            #
+            # Home Assistant renders a WARNING as a red card under "errors from
+            # custom integrations", and it cannot tell that this one already
+            # fixed itself. A notice whose whole content is "the replacement
+            # succeeded, reload the page" has no business wearing the costume of
+            # something that needs fixing. The information is not lost - it still
+            # fires on every upgrade, and it still says the byte counts - it just
+            # stops arriving as an alarm.
+            _LOGGER.info(
                 "Panel out of sync after an update: the copy under www/ was from a "
                 "previous version (%d → %d bytes) and has been replaced with the "
                 "installed one. Nothing is wrong now - reload the panel page to "
