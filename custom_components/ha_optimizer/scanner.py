@@ -440,7 +440,13 @@ class DataScanner:
         name_lower = (entry.name or entry.original_name or entity_id).lower()
         for pattern in SUSPICIOUS_PATTERNS:
             if pattern in name_lower:
-                reasons.append(f"Suspicious name: '{pattern}'")
+                # A KEY, like every other reason here. This one was the only
+                # site in the file that spelled the sentence out, and the panel
+                # prints whatever arrives - so it reached a Chinese panel as
+                # English, next to translated neighbours. The dictionary has
+                # had `reason_suspicious_name` all along.
+                reasons.append({"key": "reason_suspicious_name",
+                                "params": {"pattern": pattern}})
                 break
 
         # ── References: YAML + runtime ────────────────────────────────
