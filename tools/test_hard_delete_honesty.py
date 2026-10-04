@@ -9,18 +9,23 @@ delete as
 
 and was still there afterwards, enabled. Nothing had been removed, and the
 reason offered was one the registry actively contradicts: the same entity's
-`is_yaml_entity` was False and its `platform` was None, where a YAML automation
-has `platform == "yaml"`.
+`is_yaml_entity` was False.
 
-The cause was a guess about the registry dressed as a fact. The registry entry
-for a UI automation carries no `config_entry_id` on this version, and "no config
-entry" was read as "therefore YAML". The scanner in this same project asks the
-same question a different way, and the two answers disagreed.
+The cause was a guess about the registry dressed as a fact. On 2026.8.3 a UI
+automation is not a config entry at all - the editor writes it to
+`automations.yaml` - so its registry entry carries no `config_entry_id`, and
+"no config entry" was read as "therefore YAML".
 
-So the cases here are runtime, not text: a UI-shaped registry entry is driven
-through the real engine, and what has to come out is a removal - or a failure
-that says which. A note that says "YAML" is only allowed when the registry
-actually says `platform == "yaml"`.
+These cases are runtime, not text: a UI-shaped registry entry is driven through
+the real engine with a fake `automations.yaml` on disk, and what has to come out
+is the file edited AND the registry row gone. The stub is the endpoint's own
+mechanism - read the file, drop the entry, write it back, then remove the
+registry row - because a stub that is simpler than the thing it stands in for
+tests the stub.
+
+An earlier version of this used `homeassistant.helpers.automation_config`, which
+does not exist; it was replaced after the contents API returned 404 for it, and
+that fix is why this file fakes a YAML file rather than a collection.
 """
 from __future__ import annotations
 
@@ -43,9 +48,8 @@ def check(name: str, cond: bool, detail: str = "") -> None:
           + (f"   [{detail}]" if not cond and detail else ""))
 
 
-# ── the shape a UI automation's registry entry has on 2026.8 ────────────────
 class Entry:
-    def __init__(self, unique_id, config_entry_id=None, platform=None,
+    def __init__(self, unique_id, config_entry_id=None, platform="automation",
                  disabled=False):
         self.entity_id = "automation.ui_made"
         self.domain = "automation"
@@ -62,7 +66,8 @@ class Registry:
     def __init__(self, entry):
         self.entry = entry
         self.entities = {entry.entity_id: entry} if entry else {}
-        self.disabled_by_this = []
+        self.disabled_by_this: list[str] = []
+        self.removed: list[str] = []
 
     def async_get(self, entity_id):
         return self.entry if (self.entry and entity_id == self.entry.entity_id) else None
@@ -71,18 +76,11 @@ class Registry:
         self.entry.disabled = True
         self.disabled_by_this.append(entity_id)
 
-
-class Collection:
-    def __init__(self, items):
-        self.items = dict(items)
-        self.deleted: list[str] = []
-
-    async def async_get(self, item_id):
-        return self.items.get(item_id)
-
-    async def async_delete_item(self, item_id):
-        self.deleted.append(item_id)
-        self.items.pop(item_id, None)
+    def async_remove(self, entity_id):
+        self.removed.append(entity_id)
+        self.entities.pop(entity_id, None)
+        if self.entry and self.entry.entity_id == entity_id:
+            self.entry = None
 
 
 class ConfigEntries:
@@ -93,8 +91,64 @@ class ConfigEntries:
         self.removed.append(entry_id)
 
 
-def load(registry, collection, config_entries):
-    """exec purge_engine.py with Home Assistant stubbed to the shape above."""
+class FileSystem:
+    """The fake automations.yaml, and the loader/writer pair HA uses."""
+
+    def __init__(self, automations_yaml: list | None, scripts_yaml=None):
+        self.files = {"automations.yaml": automations_yaml,
+                      "scripts.yaml": scripts_yaml}
+        self.writes: list[str] = []
+
+    def path(self, p):
+        # Returns the name unchanged: `files` is keyed by filename, and a
+        # prefix here would silently miss every lookup - the engine would read
+        # an empty file, find nothing to remove, and report "could not be
+        # removed", which is a real outcome wearing the wrong cause.
+        return p
+
+    def load_yaml(self, p):
+        return list(self.files.get(p) or [])
+
+    def save_yaml(self, p, data):
+        self.files[p] = list(data)
+        self.writes.append(p)
+
+    # PLAIN, not async. `Hass.async_add_executor_job` returns whatever this
+    # returns, so an `async def` here hands back a coroutine nobody awaits -
+    # which is a RuntimeWarning in the noise and a silent no-op that made every
+    # removal look like a failure while the test blamed the engine.
+    def async_add_executor_job(self, fn, *args):
+        return fn(*args)
+
+
+class Hass:
+    def __init__(self, fs, config_entries):
+        self.config = fs
+        self._fs = fs
+        self.config_entries = config_entries
+
+    async def async_add_executor_job(self, fn, *args):
+        return self._fs.async_add_executor_job(fn, *args)
+
+
+def run(entry, yaml_items, *, config_entry_id=None, platform="automation"):
+    reg = Registry(entry)
+    ce = ConfigEntries()
+    fs = FileSystem(yaml_items)
+    mod = load(reg, fs)
+    engine = mod.PurgeEngine(Hass(fs, ce))
+    result = asyncio.run(engine.async_purge_entities(
+        [entry.entity_id], soft_delete=False))
+    return result, reg, fs, ce
+
+
+def load(registry, fs):
+    """exec purge_engine.py with Home Assistant stubbed.
+
+    Assigned, NOT `setdefault`: each case loads the engine with a DIFFERENT
+    registry and file, and `setdefault` would hand back the first case's stubs,
+    so the later cases would silently re-test the first one.
+    """
     ha = types.ModuleType("homeassistant"); ha.__path__ = []
     helpers = types.ModuleType("homeassistant.helpers"); helpers.__path__ = []
     core = types.ModuleType("homeassistant.core")
@@ -108,26 +162,24 @@ def load(registry, collection, config_entries):
     dt_mod.utcnow = lambda: _dt.datetime.now(_dt.timezone.utc)
     dt_mod.as_local = lambda d: d
     util.dt = dt_mod
-    ac_mod = types.ModuleType("homeassistant.helpers.automation_config")
-    ac_mod.async_get_collection = lambda hass: collection
+    cfg_mod = types.ModuleType("homeassistant.config")
+    cfg_mod.AUTOMATION_CONFIG_PATH = "automations.yaml"
+    cfg_mod.SCRIPT_CONFIG_PATH = "scripts.yaml"
+    yaml_mod = types.ModuleType("homeassistant.util.yaml")
+    yaml_mod.load_yaml = fs.load_yaml
+    yaml_mod.save_yaml = fs.save_yaml
 
-    # Assigned, NOT `setdefault`. Each case loads the engine with a DIFFERENT
-    # registry and collection, and `setdefault` would hand back the first
-    # case's stubs - so cases 2 and 3 would silently be re-testing case 1. That
-    # is the whole "a stub that is stale is worse than no stub" trap, reached
-    # from the other direction.
     for name, mod in (("homeassistant", ha), ("homeassistant.helpers", helpers),
                       ("homeassistant.core", core),
                       ("homeassistant.helpers.entity_registry", er_mod),
                       ("homeassistant.util", util),
                       ("homeassistant.util.dt", dt_mod),
-                      ("homeassistant.helpers.automation_config", ac_mod)):
+                      ("homeassistant.config", cfg_mod),
+                      ("homeassistant.util.yaml", yaml_mod)):
         sys.modules[name] = mod
 
     pkg = types.ModuleType("haopt"); pkg.__path__ = [str(COMP)]
     sys.modules["haopt"] = pkg
-    # The real const, not a hand-written one: a stub missing a name the engine
-    # imports is an ImportError that reads like a defect in the engine.
     const = types.ModuleType("haopt.const")
     const.__file__ = str(COMP / "const.py")
     exec(compile((COMP / "const.py").read_text(encoding="utf-8"),
@@ -141,70 +193,56 @@ def load(registry, collection, config_entries):
     return spec
 
 
-class Hass:
-    def __init__(self, config_entries):
-        self.config_entries = config_entries
+AID = "ui_made_1234"
+CFG_ITEM = {"id": AID, "alias": "ui-made", "triggers": [], "actions": []}
 
-
-def run(entry, collection_items, config_entry_id=None, platform=None):
-    reg = Registry(entry)
-    col = Collection(collection_items)
-    ce = ConfigEntries()
-    mod = load(reg, col, ce)
-    engine = mod.PurgeEngine(Hass(ce))
-    result = asyncio.run(engine.async_purge_entities(
-        [entry.entity_id], soft_delete=False))
-    return result, reg, col, ce
-
-
-# ── 1. a UI automation IS in the UI config collection: it must be removed ──
-E = Entry(unique_id="ui_made_1234", config_entry_id=None, platform=None)
-res, reg, col, ce = run(E, {"ui_made_1234": {"alias": "ui-made"}})
+# ── 1. a UI automation IS in automations.yaml: it must actually be removed ──
+E = Entry(unique_id=AID, config_entry_id=None, platform="automation")
+res, reg, fs, ce = run(E, [dict(CFG_ITEM), {"id": "other", "alias": "keep me"}])
 check("a UI automation is REMOVED, not reported as YAML",
       E.entity_id in (res.get("success") or []),
       f"success={res.get('success')} yaml_manual={res.get('yaml_manual')}")
-check("the removal went through the UI config collection",
-      col.deleted == ["ui_made_1234"], f"deleted={col.deleted}")
+check("its entry is gone from automations.yaml",
+      [x.get("id") for x in (fs.files["automations.yaml"] or [])] == ["other"],
+      f"file now holds {[x.get('id') for x in (fs.files['automations.yaml'] or [])]}")
+check("and the file was actually written, not just edited in memory",
+      fs.writes == ["automations.yaml"], f"writes={fs.writes}")
+check("the entity registry row is removed too",
+      reg.removed == [E.entity_id], f"async_remove called with {reg.removed}")
 check("and NOT through a config entry that does not exist",
       ce.removed == [], f"config_entries.async_remove called with {ce.removed}")
 check("no YAML is claimed anywhere in the result",
-      not (res.get("yaml_manual") or []),
-      f"yaml_manual={res.get('yaml_manual')}")
-check("the failure list is empty - it succeeded",
-      not (res.get("failed") or []), f"failed={res.get('failed')}")
+      not (res.get("yaml_manual") or []), f"yaml_manual={res.get('yaml_manual')}")
 
-# ── 2. the entity is NOT in the collection: a failure, not a reason ────────
-E2 = Entry(unique_id="ui_made_5678", config_entry_id=None, platform=None)
-res2, reg2, col2, ce2 = run(E2, {})            # empty collection
-check("an entity in no collection at all is a FAILURE, not a removal",
-      E2.entity_id not in (res2.get("success") or []),
-      f"success={res2.get('success')}")
-check("and it is disabled rather than left running after a hard delete",
+# ── 2. not in the file at all: disabled and recorded, never claimed as YAML ─
+E2 = Entry(unique_id="not_in_file", config_entry_id=None, platform="automation")
+res2, reg2, _fs2, _ce2 = run(E2, [{"id": "someone_else", "alias": "x"}])
+check("an entity in no editor file is NOT reported as a removal",
+      E2.entity_id not in (res2.get("success") or []), f"success={res2.get('success')}")
+check("and the file is left untouched",
+      [x.get("id") for x in (_fs2.files["automations.yaml"] or [])] == ["someone_else"])
+check("it is disabled rather than left running after a hard delete",
       reg2.disabled_by_this == [E2.entity_id], f"disabled={reg2.disabled_by_this}")
-check("and the failure names what actually happened, not YAML",
-      not any("YAML" in str(f) for f in (res2.get("failed") or [])),
-      f"failed={res2.get('failed')}")
+check("and nothing is claimed as YAML",
+      not any("YAML" in str(x) for x in (res2.get("yaml_manual") or [])),
+      f"yaml_manual={res2.get('yaml_manual')}")
 
-# ── 3. an entity the registry calls YAML: same handling, honest wording ────
+# ── 3. platform == 'yaml' is still called YAML, same handling ──────────────
 E3 = Entry(unique_id="from_yaml", config_entry_id=None, platform="yaml")
-res3, r3, _c3, _ce3 = run(E3, {})
+res3, r3, _f3, _c3 = run(E3, [])
 rows = res3.get("yaml_manual") or []
 check("an entity with platform == 'yaml' IS reported as YAML",
       bool(rows) and "YAML" in str(rows[0].get("note", "")), f"rows={rows}")
-check("but the handling is the same as any other unremovable entity: disabled",
+check("but the handling is the same for any unremovable entity: disabled",
       E3.entity_id in (res3.get("disabled_only") or []),
       f"disabled_only={res3.get('disabled_only')}")
-check("one rule, not two - a YAML guess must not change what happens to it",
-      E3.entity_id in (r3.disabled_by_this), f"disabled={r3.disabled_by_this}")
 
-# ── 4. the claim is conditional in the source, not unconditional ───────────
-src = ENGINE.read_text(encoding="utf-8")
-check("the YAML note is gated on what the registry says",
-      'is_yaml = getattr(entry, "platform", None) == "yaml"' in src,
-      "the note is emitted unconditionally")
-check("and 'no owning config entry' is a distinct outcome, not 'not_found'",
-      '"no_owner"' in src,
-      "not_found is the already-gone case and must stay separate")
+# ── 4. the file is never written when nothing matched ──────────────────────
+E4 = Entry(unique_id="absent", config_entry_id=None, platform="automation")
+_fs4 = None
+res4, _r4, fs4, _c4 = run(E4, [{"id": "x", "alias": "y"}])
+check("a no-match removal does not write the file at all",
+      fs4.writes == [], f"writes={fs4.writes}")
 
 ok = sum(1 for r in results if r[0])
 print()

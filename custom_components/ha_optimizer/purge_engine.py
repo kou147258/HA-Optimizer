@@ -485,42 +485,73 @@ class PurgeEngine:
                 )
             return "disabled"
 
-        # Where a UI-created automation actually lives. On 2026.8.3 its entity
-        # registry entry carries no `config_entry_id` at all, so the config
-        # entry branch below never fired for it, and the only thing that came
-        # back was a wrong explanation. The REST endpoint the automation editor
-        # uses is built on this collection, and deleting through it was verified
-        # to work on a live instance.
+        # Where a UI-created automation actually lives. It is not a config
+        # entry at all: since 2025 the editor writes to `automations.yaml`, and
+        # its registry entry therefore carries NO `config_entry_id` - which is
+        # precisely why the code below used to conclude "YAML-defined" and give
+        # up. The thing it was looking for does not exist in this version, and
+        # what it meant by "YAML" was indistinguishable from what the registry
+        # actually means by it.
         #
-        # A guarded import, and a distinct "failed" if the call itself errors:
-        # falling through on an ImportError is safe (it does what it did
-        # before), but swallowing a real failure would report a removal that
-        # did not happen.
+        # So do what the editor's own delete endpoint does, which was read off
+        # 2026.8.3 rather than guessed: `homeassistant/components/config/
+        # automation.py` registers an EditAutomationConfigView over
+        # AUTOMATION_CONFIG_PATH, and that view's delete pops the entry from the
+        # loaded list, writes the file back on the executor, and then - in its
+        # post-write hook - looks the entity up by (domain, platform, id) and
+        # removes the registry row. Two steps, registry second.
+        #
+        # An earlier attempt here used `homeassistant.helpers.automation_config`,
+        # which does not exist: the contents API 404s for it. That version would
+        # have taken its ImportError branch on every call and still deleted
+        # nothing, so the difference is the difference between a fix and a
+        # polite message.
         unique_id = getattr(reg_entry, "unique_id", None)
         if unique_id:
+            yaml_path = None
             try:
-                from homeassistant.helpers import automation_config
-
-                collection = automation_config.async_get_collection(self.hass)
-            except ImportError as exc:
-                _LOGGER.debug(
-                    "%s: no automation_config helper (%s); falling back to the "
-                    "config entry path", entity_id, exc,
+                from homeassistant.config import (
+                    AUTOMATION_CONFIG_PATH,
+                    SCRIPT_CONFIG_PATH,
                 )
-            except Exception as exc:  # noqa: BLE001
-                _LOGGER.warning("Could not reach the %s config collection for %s: %s",
-                                domain, entity_id, exc)
-                return _failed("the config collection could not be reached")
-            else:
+                yaml_path = (AUTOMATION_CONFIG_PATH if domain == "automation"
+                             else SCRIPT_CONFIG_PATH)
+            except ImportError:
+                # The same strings `homeassistant/config.py` defines. A rename
+                # there should be a loud mismatch here, not a silent no-op.
+                yaml_path = {"automation": "automations.yaml",
+                             "script": "scripts.yaml"}.get(domain)
+            if yaml_path:
                 try:
-                    if await collection.async_get(unique_id) is not None:
-                        await collection.async_delete_item(unique_id)
-                        _LOGGER.info("Deleted %s %s from the UI config", domain, unique_id)
-                        return "removed"
-                except Exception as exc:  # noqa: BLE001
-                    _LOGGER.warning("Could not delete %s from the %s config "
-                                    "collection: %s", entity_id, domain, exc)
-                    return _failed("the config collection refused the delete")
+                    from homeassistant.util.yaml import load_yaml, save_yaml
+                except ImportError as exc:  # noqa: BLE001
+                    _LOGGER.debug("%s: no yaml helpers (%s)", entity_id, exc)
+                else:
+                    try:
+                        path = self.hass.config.path(yaml_path)
+                        entries = await self.hass.async_add_executor_job(
+                            load_yaml, path)
+                        entries = list(entries or [])
+                        kept = [x for x in entries
+                                if not (isinstance(x, dict)
+                                        and x.get("id") == unique_id)]
+                        if len(kept) == len(entries):
+                            # Not in the editor's file. Whatever it is, this is
+                            # not where it lives - which is a fact, not a guess.
+                            _LOGGER.info("%s (id %s) is not in %s", entity_id,
+                                         unique_id, yaml_path)
+                        else:
+                            await self.hass.async_add_executor_job(
+                                save_yaml, path, kept)
+                            if ent_reg.async_get(entity_id):
+                                ent_reg.async_remove(entity_id)
+                            _LOGGER.info("Deleted %s %s from %s", domain,
+                                         unique_id, yaml_path)
+                            return "removed"
+                    except Exception as exc:  # noqa: BLE001
+                        _LOGGER.warning("Could not delete %s from %s: %s",
+                                        entity_id, yaml_path, exc)
+                        return _failed(f"it could not be removed from {yaml_path}")
 
         # A config entry owns it. The entity_id slug, the config entry's
         # unique_id and its entry_id are all different things, so the registry
