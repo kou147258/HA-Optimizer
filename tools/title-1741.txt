@@ -1,0 +1,1 @@
+1.7.41 — one scan reason was still English: the backend spelled it out instead of sending a key
