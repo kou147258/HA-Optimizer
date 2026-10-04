@@ -1948,10 +1948,18 @@ function renderGroupStrip() {
   host.style.display = '';
   host.innerHTML = resultGroups.map(g => {
     const id = g.area_id === null || g.area_id === undefined ? '' : g.area_id;
+    // The area id is a registry value Home Assistant accepts verbatim, and it
+    // goes into an attribute and into two inline handlers. It was interpolated
+    // raw, so an area named `a" onmouseover="alert(1)` produced a live event
+    // handler - a stored injection, on a page that runs with `hass` in reach.
+    // escapeHtml is the right tool for the attribute; for the two handlers the
+    // value is JS source, so it is JSON-encoded and the attribute escaped.
+    const attrId = escapeHtml(id);
+    const jsId = escapeHtml(JSON.stringify(String(id)));
     const on = groupFilter !== null && String(groupFilter) === String(id);
     const plats = Object.entries(g.platforms || {})
-      .map(([p, n]) => `<span class="group-plat">${p} <b>${n}</b></span>`).join('');
-    return `<div class="group-card${on ? ' on' : ''}" data-area="${id}">
+      .map(([p, n]) => `<span class="group-plat">${escapeHtml(p)} <b>${n}</b></span>`).join('');
+    return `<div class="group-card${on ? ' on' : ''}" data-area="${attrId}">
       <div class="group-head">
         <span class="group-name">${escapeHtml(g.area_name || t('groupNoArea'))}</span>
         <span class="group-count">${g.count}</span>
@@ -1975,8 +1983,8 @@ function renderGroupStrip() {
           + `</div>`;
       })()}
       <div class="group-actions">
-        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();filterByGroup('${id}')">${t('groupFilter')}</button>
-        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();selectGroup('${id}')">${t('groupSelect')}</button>
+        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();filterByGroup(${jsId})">${t('groupFilter')}</button>
+        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();selectGroup(${jsId})">${t('groupSelect')}</button>
       </div>
     </div>`;
   }).join('');
@@ -1998,7 +2006,10 @@ function selectGroup(areaId) {
                         .map(r => r.entity_id);
   ids.forEach(id => selectedIds.add(id));
   updateSelectedBar();
-  toast(t('groupSelected', { n: ids.length }), 'info');
+  // The message first. Every other call site in this file is toast(type, msg);
+  // this one was inverted, so the toast showed the word "info" as its text and
+  // none of the type classes the stylesheet defines.
+  toast('info', t('groupSelected', { n: ids.length }));
 }
 
 function displayResults(results, groups, writeInfo, writeRoll) {
@@ -2939,9 +2950,21 @@ async function loadSoftDeleted() {
         badge = '<div style="margin-top:3px; font-size:0.75rem; color:var(--warning)">'
           + t('trashRenamedTo', { id: item.current_entity_id }) + '</div>';
       } else if (gone) {
-        badge = '<div style="margin-top:3px"><span class="reason-tag" '
-          + 'style="background:rgba(244,67,54,0.1); color:var(--danger); '
-          + 'border:1px solid rgba(244,67,54,0.3)">' + t('trashGone') + '</span></div>';
+        // `status` is "gone" for two different reasons, and the backend
+        // distinguishes them with `identity_known`: the entity really is
+        // missing, or the registry lookup could not be done at all. Showing
+        // the first as the second states a deletion that nobody established -
+        // and the row below hides the Restore button, so the user is told the
+        // entity is beyond recovery on the strength of a failed lookup.
+        if (item.identity_known === false) {
+          badge = '<div style="margin-top:3px"><span class="reason-tag" '
+            + 'style="background:rgba(255,152,0,0.1); color:var(--warning); '
+            + 'border:1px solid rgba(255,152,0,0.3)">' + t('trashUnknown') + '</span></div>';
+        } else {
+          badge = '<div style="margin-top:3px"><span class="reason-tag" '
+            + 'style="background:rgba(244,67,54,0.1); color:var(--danger); '
+            + 'border:1px solid rgba(244,67,54,0.3)">' + t('trashGone') + '</span></div>';
+        }
       }
       return (
       '<tr id="soft-row-' + item.entity_id.replace('.', '_') + '">' +
@@ -2952,11 +2975,13 @@ async function loadSoftDeleted() {
         '<td class="trash-actions-cell">' +
           '<div class="trash-actions">' +
             (gone
-              ? '<span style="color:var(--text-muted); font-size:0.78rem">' + t('trashGoneHint') + '</span>'
+              ? '<span style="color:var(--text-muted); font-size:0.78rem">'
+                + (item.identity_known === false ? t('trashUnknownHint') : t('trashGoneHint'))
+                + '</span>'
               : '<button class="btn btn-ghost" ' +
-                'onclick="restoreEntity(&#39;' + item.entity_id + '&#39;, this)">' + t('softRestoreBtn') + '</button>') +
+                'onclick="restoreEntity(&#39;' + escapeHtml(item.entity_id) + '&#39;, this)">' + t('softRestoreBtn') + '</button>') +
             '<button class="btn btn-danger" ' +
-              'onclick="hardDeleteEntity(&#39;' + item.entity_id + '&#39;, this)">' + t('softHardDelBtn') + '</button>' +
+              'onclick="hardDeleteEntity(&#39;' + escapeHtml(item.entity_id) + '&#39;, this)">' + t('softHardDelBtn') + '</button>' +
           '</div>' +
         '</td>' +
       '</tr>'
@@ -4690,6 +4715,8 @@ const I18N = {
     impactScanScope: 'Checked: automations, scripts, groups, dashboards and packages. A reference hidden inside a template, or inside an automation that has not loaded yet, will not appear here.',
     trashRenamedTo: (p) => `renamed to ${p.id} since it was disabled`,
     trashGone: 'no longer exists',
+    trashUnknown: 'identity could not be checked',
+    trashUnknownHint: 'Nothing to restore, and nothing proved it is gone',
     trashGoneHint: 'Nothing to restore — use Delete record',
     confirmHardDelete: (id) => `Permanently delete ${id}?\nThis action CANNOT be undone.`,
     purgeSuccessHard: (n) => `✅ Permanently deleted ${n} entities`,
@@ -5217,6 +5244,8 @@ const I18N = {
     impactScanScope: '已检查：自动化、脚本、分组、仪表盘和集成包。藏在模板里的引用，或尚未加载的自动化里的引用，不会出现在这里。',
     trashRenamedTo: (p) => `禁用后被改名为 ${p.id}`,
     trashGone: '已不存在',
+    trashUnknown: '身份未能确认',
+    trashUnknownHint: '没有可恢复的内容，也没有任何证据证明它已消失',
     trashGoneHint: '没有可恢复的内容 —— 用「删除记录」清理',
     confirmHardDelete: (id) => `彻底删除 ${id}?\n此操作无法撤销。`,
     purgeSuccessHard: (n) => `✅ 已彻底删除 ${n} 个实体`,
@@ -6380,7 +6409,7 @@ document.addEventListener('DOMContentLoaded', () => {
      The strip prints both, and a mismatch becomes visible instead of having to
      be inferred. Bumped with the version; check_build_stamp keeps it in step
      with const.py. -->
-<script>const PANEL_FILE_BUILD = '1.7.32';
+<script>const PANEL_FILE_BUILD = '1.7.33';
        const EXPECTED_TAB_COUNT = 10;</script>
 <script>
 /* What this browser actually loaded, as facts. The file on disk was correct

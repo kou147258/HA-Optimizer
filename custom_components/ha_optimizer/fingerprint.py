@@ -196,8 +196,14 @@ class DailyProfiler:
                           AND event_type = 'automation_triggered'
                     """)).scalar()
                     metrics["automation_triggers"] = int(auto_row or 0)
-                except Exception:
+                except Exception as exc:  # noqa: BLE001
+                    # A stored 0 is indistinguishable from a measured one,
+                    # and the detector would then treat "no triggers" as a
+                    # fact about the day. There are two of these - the
+                    # profiler and today's profile - and both need it.
                     metrics["automation_triggers"] = 0
+                    metrics["automation_triggers_failed"] = str(exc)[:160]
+                    _LOGGER.warning("Could not count automation triggers: %s", exc)
 
                 # 4. Integration restarts: count states flipping to unavailable/unknown
                 #    per platform — the best proxy that needs no log file access
@@ -359,17 +365,30 @@ class SigmaDetector:
         history: PAST days only (today excluded), one metrics dict per item.
         """
         anomalies = []
-        n = len(history)
+        # Samples, not days. A store can hold 30 days of which only 3 carry
+        # a given metric, and choosing the algorithm on the day count
+        # reported "critical, 30 days, 99% confidence" off three points -
+        # while the guard two lines below correctly insisted on three.
 
         for metric_key, (label, unit) in self.METRIC_LABELS.items():
             today_val = today.get(metric_key)
             if today_val is None:
                 continue
 
-            hist_vals = [
-                d[metric_key] for d in history
-                if d.get(metric_key) is not None
-            ]
+            # A stored value can be anything: the store is a hand-editable
+            # JSON file, and its keys were validated while its values never
+            # were. One string where a number belongs raised TypeError out
+            # of `detect()` and out of `async_analyze`, and there is no try
+            # there - so a single corrupt record failed the whole tab.
+            hist_vals: list[float] = []
+            for d in history:
+                stored = d.get(metric_key)
+                if stored is None or isinstance(stored, bool):
+                    continue
+                try:
+                    hist_vals.append(float(stored))
+                except (TypeError, ValueError):
+                    continue
             if len(hist_vals) < 3:
                 continue  # too few days to compare
 
@@ -409,7 +428,7 @@ class SigmaDetector:
             else:
                 desc_key = "fp_anomaly_desc"
                 # Pick the algorithm
-                if n >= MIN_DAYS_FOR_SIGMA:
+                if len(hist_vals) >= MIN_DAYS_FOR_SIGMA:
                     method = "σ"
                     try:
                         stdev = statistics.stdev(hist_vals)
@@ -451,7 +470,11 @@ class SigmaDetector:
                 "unit": unit,
                 "today": today_val,
                 "baseline_mean": round(mean_val, 1),
-                "baseline_days": n,
+                    # The days that actually carry THIS metric, which is what the
+                    # description below already reported as its `days`. It used
+                    # to be the number of days in the store, so a metric
+                    # present in 3 of 30 days claimed a 30-day baseline.
+                    "baseline_days": len(hist_vals),
                 # None when the baseline mean is zero: there is no percentage
                 # to report, and the panel must render the absolute delta then.
                 "pct_change": pct_change,
@@ -688,11 +711,14 @@ class FingerprintAnalyzer:
             metrics: dict[str, Any] = {"date": today_str}
 
             # Hours since local midnight - the fraction the counted metrics
-            # below are projected by. Measured between two aware datetimes so
-            # a 23h or 25h DST day is scaled by what actually elapsed, and
-            # local rather than UTC so "today" means the user's today.
+            # below are projected by. Subtracting two wall-clock readings
+            # that share one ZoneInfo is a NAIVE subtraction, so a DST day
+            # reads 23.5h when 24.5h passed and 12.0h when 11.0 did, against
+            # a baseline that stored the real 23h/25h day. Through UTC first
+            # is real elapsed time.
             hours_elapsed = (
-                local_now - _local_midnight(today, tz)
+                dt_util.utcnow()
+                - _local_midnight(today, tz).astimezone(dt_util.UTC)
             ).total_seconds() / 3600.0
             metrics["hours_elapsed"] = round(hours_elapsed, 1)
             # Computed, not hardcoded: a day stays partial until 24h of it have
@@ -739,8 +765,14 @@ class FingerprintAnalyzer:
                     raw_auto = int(auto_row or 0)
                     metrics["automation_triggers"] = _extrapolate_to_day(raw_auto, hours_elapsed)
                     metrics["automation_triggers_raw"] = raw_auto
-                except Exception:
+                except Exception as exc:  # noqa: BLE001
+                    # A stored 0 is indistinguishable from a measured one,
+                    # and the detector would then treat "no triggers" as a
+                    # fact about the day. There are two of these - the
+                    # profiler and today's profile - and both need it.
                     metrics["automation_triggers"] = 0
+                    metrics["automation_triggers_failed"] = str(exc)[:160]
+                    _LOGGER.warning("Could not count automation triggers: %s", exc)
                     metrics["automation_triggers_raw"] = 0
 
                 # No LIMIT: the sum below is the day's total, and a limited row
