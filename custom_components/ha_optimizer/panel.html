@@ -1320,10 +1320,10 @@
         </select>
         <select class="filter-select" id="filterCat" onchange="applyFilters()">
           <option value="" data-i18n="filterAllCat">All types</option>
-          <option value="entity">Entity</option>
-          <option value="helper">Helper</option>
-          <option value="automation">Automation</option>
-          <option value="script">Script</option>
+          <option value="entity" data-i18n="filterCatEntity">Entity</option>
+          <option value="helper" data-i18n="filterCatHelper">Helper</option>
+          <option value="automation" data-i18n="filterCatAutomation">Automation</option>
+          <option value="script" data-i18n="filterCatScript">Script</option>
         </select>
         <select class="filter-select" id="filterYaml" onchange="applyFilters()">
           <option value="" data-i18n="filterAllSource">All sources</option>
@@ -2156,7 +2156,10 @@ function _renderOverview(s) {
   // ── KPI: by category ──
   const catEl = document.getElementById('kpiByCategory');
   if (catEl && s.by_category) {
-    const catMap = { entity:'⚡ Entity', automation:'🤖 Auto', helper:'🔧 Helper', script:'📜 Script' };
+    // Through t(), like the risk pill next to it. A literal here is a Chinese
+    // panel with an English column.
+    const catMap = { entity: t('catEntity'), automation: t('catAuto'),
+                     helper: t('catHelper'), script: t('catScript') };
     const rows = Object.entries(s.by_category)
       .filter(([,v]) => v > 0)
       .sort((a,b) => b[1]-a[1])
@@ -2381,7 +2384,8 @@ function renderTable() {
     const isSelected = selectedIds.has(r.entity_id);
     const riskClass = `risk-${r.risk_level}`;
     const riskLabel = r.risk_level === 'low' ? `🟢 ${t('filterLow').replace('🟢 ','')}` : r.risk_level === 'medium' ? `🟡 ${t('filterMedium').replace('🟡 ','')}` : `🔴 ${t('filterHigh').replace('🔴 ','')}`;
-    const catLabel = { entity: '⚡ Entity', helper: '🔧 Helper', automation: '🤖 Auto', script: '📜 Script' }[r.category] || r.category;
+    const catLabel = { entity: t('catEntity'), helper: t('catHelper'),
+                       automation: t('catAuto'), script: t('catScript') }[r.category] || r.category;
     const lastChanged = r.last_changed ? new Date(r.last_changed).toLocaleDateString() : t('noData');
 
     // Build clickable "used_in" links
@@ -4709,6 +4713,10 @@ const I18N = {
     autoDiag_timeout: 'The run exceeded its time limit. Usually a wait_template loop or a service that is slow to answer; check the step\'s duration in the trace timeline.',
     autoDiag_no_response: 'The target stopped responding mid-run. This is usually the device, not the automation.',
     autoTraceBehind: 'Triggered {triggered}, but the stored run only reaches {stored}. Home Assistant writes traces to disk only when it stops, so a run from the last few hours is not in there yet — it appears after a restart.',
+    catEntity: '⚡ Entity', catHelper: '🔧 Helper',
+    catAuto: '🤖 Auto', catScript: '📜 Script',
+    filterCatEntity: 'Entity', filterCatHelper: 'Helper',
+    filterCatAutomation: 'Automation', filterCatScript: 'Script',
     autoSuggestion: 'What usually causes this', autoMatched: 'matched',
     autoUnclassified: 'This error was not recognised, so no suggestion is offered rather than a generic one.',
     autoConsecutive: (p) => `${p.n} failures in a row`,
@@ -5244,6 +5252,10 @@ const I18N = {
     autoDiag_timeout: '这次运行超出了时间限制。通常是 wait_template 循环，或者某个服务响应很慢；去 trace 时间线里看那一步的耗时。',
     autoDiag_no_response: '目标在运行途中停止响应。这通常是设备的问题，不是自动化的问题。',
     autoTraceBehind: '已于 {triggered} 触发，但已存储的运行记录只到 {stored}。HA 只在停止时把 trace 写盘，所以最近几小时的运行还不在里面——重启后就会出现。',
+    catEntity: '⚡ 实体', catHelper: '🔧 辅助实体',
+    catAuto: '🤖 自动化', catScript: '📜 脚本',
+    filterCatEntity: '实体', filterCatHelper: '辅助实体',
+    filterCatAutomation: '自动化', filterCatScript: '脚本',
     autoSuggestion: '这类错误的常见原因', autoMatched: '命中',
     autoUnclassified: '这个错误没有被识别，所以不给建议，而不是给一个泛泛的。',
     autoConsecutive: (p) => `连续失败 ${p.n} 次`,

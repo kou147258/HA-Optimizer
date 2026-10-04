@@ -319,6 +319,41 @@ for key in ("btnDisable", "modalSoftDeleteTitle"):
 check("the irreversible control still leads with its own glyph",
       all(str(DICT[lang]["btnHardDelete"]).startswith("❌") for lang in LANGS))
 
+print("\nlabel: a label spelled out in JS is English in every language")
+# A fourth class, and the one that produced a Chinese column header reading
+# 类型 above cells reading `Entity` and `Auto`. The category map was a literal
+# inside the render function, and the four filter `<option>`s had no data-i18n
+# while the "all types" option directly above them did. Nothing errored: the
+# text was correct, in one language, forever.
+CATEGORY_LITERALS = (
+    # (the key a JS map would be keyed by, the label it would spell out)
+    ("entity", "⚡ Entity"), ("helper", "🔧 Helper"),
+    ("automation", "🤖 Auto"), ("script", "📜 Script"),
+)
+for key, label in CATEGORY_LITERALS:
+    # Precise on purpose. The dictionary entries are `catEntity: '⚡ Entity'`,
+    # so matching the *dictionary's* key too would flag the fix instead of the
+    # defect. What must not exist is the CATEGORY name mapped to a literal
+    # label, which is the shape the render function had.
+    shape = f"{key}: '{label}'"
+    check(f"no JS map spells {shape} out",
+          shape not in PANEL,
+          "a literal label in JS: it is English in every language, forever")
+for key in ("catEntity", "catHelper", "catAuto", "catScript"):
+    check(f"every language defines {key}", has_key(key),
+          "t() falls back to en and then to the key name, so this shows as "
+          "the key rather than as text")
+for key in ("filterCatEntity", "filterCatHelper",
+            "filterCatAutomation", "filterCatScript"):
+    for lang in LANGS:
+        check(f"{lang}.{key} exists", key in DICT[lang],
+              "t() falls back to returning the key")
+for value in ("entity", "helper", "automation", "script"):
+    m = re.search(rf'<option value="{value}"[^>]*>', PANEL)
+    check(f"the {value} filter option carries data-i18n",
+          m is not None and "data-i18n" in m.group(0),
+          f"found: {m.group(0) if m else 'no such option'}")
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} check(s) FAILED:")

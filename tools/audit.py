@@ -232,6 +232,8 @@ TOOL_CHECKS: list[tuple[str, str, list[str]]] = [
      "the render check catches a neutered renderer, a blank render and a swallowed throw",
      ["counterproof_panel_renders.py"]),
     ("panel.ui_labels.cp", "UI label checks can still fail", ["counterproof_ui_labels.js"]),
+    ("panel.ui_labels.literal.cp", "a label spelled out in JS is caught, and the control stays green",
+     ["counterproof_ui_literal_labels.py"]),
     ("restore.truth", "restore truth regressions", ["test_restore_truth.py"]),
     ("restore.truth.cp", "restore truth checks can still fail", ["counterproof_restore.py"]),
     ("restore.engine", "restore engine behaviour", ["test_restore_engine.py"]),
