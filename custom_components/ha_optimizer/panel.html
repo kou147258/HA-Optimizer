@@ -1074,7 +1074,7 @@
   <!-- CONNECTION STATUS (replaces token dropdown) -->
   <div id="connStatusWrap" style="display:flex;align-items:center;gap:6px;padding:7px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-size:0.8rem;color:var(--text-muted)">
     <span id="connStatusDot" style="width:7px;height:7px;border-radius:50%;background:var(--text-muted);display:inline-block;flex-shrink:0"></span>
-    <span id="connStatusTxt">Connecting…</span>
+    <span id="connStatusTxt" data-i18n="connConnecting">Connecting…</span>
   </div>
   </div><!-- end topbar-controls -->
 </div>
@@ -1540,7 +1540,15 @@
     // both only exist after that script has run. Measuring earlier reported on
     // the wrong moment - it called escapeHtml missing on a page that had it.
     var v = new URLSearchParams(location.search).get('v');
-    document.getElementById('buildVersion').textContent = v ? 'v' + v : '(unversioned copy)';
+    // The two words are spelled out rather than taken from the dictionary,
+    // because t() is defined in the main script and this block runs BEFORE
+    // it - that is the entire reason it exists, since it reports the build
+    // before the panel has measured itself. A translation this code cannot
+    // reach would be a dictionary entry that lies about being translated.
+    var _zh = (navigator.language || '').toLowerCase().indexOf('zh') === 0;
+    document.getElementById('buildVersion').textContent = v
+      ? 'v' + v
+      : (_zh ? '（未版本化的副本）' : '(unversioned copy)');
   })();
 </script>
 
@@ -4717,6 +4725,7 @@ const I18N = {
     catAuto: '🤖 Auto', catScript: '📜 Script',
     filterCatEntity: 'Entity', filterCatHelper: 'Helper',
     filterCatAutomation: 'Automation', filterCatScript: 'Script',
+    connConnecting: 'Connecting…',
     autoSuggestion: 'What usually causes this', autoMatched: 'matched',
     autoUnclassified: 'This error was not recognised, so no suggestion is offered rather than a generic one.',
     autoConsecutive: (p) => `${p.n} failures in a row`,
@@ -5256,6 +5265,7 @@ const I18N = {
     catAuto: '🤖 自动化', catScript: '📜 脚本',
     filterCatEntity: '实体', filterCatHelper: '辅助实体',
     filterCatAutomation: '自动化', filterCatScript: '脚本',
+    connConnecting: '连接中…',
     autoSuggestion: '这类错误的常见原因', autoMatched: '命中',
     autoUnclassified: '这个错误没有被识别，所以不给建议，而不是给一个泛泛的。',
     autoConsecutive: (p) => `连续失败 ${p.n} 次`,
